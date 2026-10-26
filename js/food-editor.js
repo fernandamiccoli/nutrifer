@@ -2,7 +2,7 @@
 // they are always stored per 100 g so every food behaves the same in the portion step.
 import { esc, icon } from './util.js';
 import { saveMyFood } from './catalog.js';
-import { estimateNutrition, AI_MESSAGES } from './ai.js';
+import { estimateNutrition, aiProgress, aiErrorHtml } from './ai.js';
 
 const MISSING_LABEL = { name: 'nombre', kcal: 'energía', p: 'proteínas', c: 'carbohidratos', f: 'grasas' };
 
@@ -79,10 +79,9 @@ export function renderFoodEditor(container, { food, draft, missing = [], title, 
       }
       const brand = form.brand.value.trim();
       const desc = `1 ${form.unitLabel.value.trim() || 'porción'}${form.unitG.value ? ` de ${form.unitG.value} g` : ''} de ${name}${brand ? ` (${brand})` : ''}`;
-      b.disabled = true;
-      b.textContent = 'Calculando...';
+      const progress = aiProgress(b, outEl);
       try {
-        const r = await estimateNutrition(desc);
+        const r = await estimateNutrition(desc, progress.options);
         form.querySelector('input[name="mode"][value="portion"]').checked = true;
         if (!form.unitG.value && r.grams) form.unitG.value = r.grams;
         form.kcal.value = r.kcal;
@@ -91,13 +90,11 @@ export function renderFoodEditor(container, { food, draft, missing = [], title, 
         form.f.value = r.fat;
         aiEstimated = true;
         aiNote = `${r.assumptions} (confianza ${r.confidence})`;
-        outEl.innerHTML = `<strong>Estimación de IA, confianza ${esc(r.confidence)}.</strong> ${esc(r.assumptions)} Revisá los valores y guardá.`;
+        progress.done(`<strong>Estimación de IA, confianza ${esc(r.confidence)}.</strong> ${esc(r.assumptions)} Revisá los valores y guardá.`);
       } catch (err) {
-        outEl.textContent = AI_MESSAGES[err.code] ?? AI_MESSAGES.network;
-      } finally {
-        b.disabled = false;
-        b.textContent = 'Calcular de nuevo con IA';
+        progress.done(aiErrorHtml(err));
       }
+      b.textContent = 'Calcular de nuevo con IA';
     }
   });
 

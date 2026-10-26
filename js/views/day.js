@@ -11,7 +11,7 @@ import { WORKOUT_TYPES, MUSCLES, ratesFor, kcalFromRate, workoutSummary, dayActi
 import { openAddFood } from '../add-food.js';
 import { compressPhoto } from '../photos.js';
 import { prepFieldsHtml, readPrep, prepSummary, syncOilEntry } from '../prep.js';
-import { estimateNutrition, parseWorkout, AI_MESSAGES } from '../ai.js';
+import { estimateNutrition, parseWorkout, aiProgress, aiErrorHtml } from '../ai.js';
 import { maybeUpdateProfileWeight } from './progress.js';
 
 const main = document.getElementById('main');
@@ -398,18 +398,15 @@ async function editEntry(id) {
       const outEl = form.querySelector('.ai-out');
       const { oilG, prep, itemNote } = readPrep(form);
       const desc = [`${e.qtyLabel} de ${e.name}`, prep.toLowerCase(), itemNote, oilG ? 'sin contar el aceite agregado (se registra aparte)' : ''].filter(Boolean).join(', ');
-      btn.disabled = true;
-      btn.textContent = 'Calculando...';
+      const progress = aiProgress(btn, outEl);
       try {
-        const r = await estimateNutrition(desc);
+        const r = await estimateNutrition(desc, progress.options);
         aiResult = r;
-        outEl.innerHTML = `<strong>${num.format(r.kcal)} kcal · P ${dec.format(r.protein)} · C ${dec.format(r.carbs)} · G ${dec.format(r.fat)} g</strong> (confianza ${esc(r.confidence)}). ${esc(r.assumptions)} Tocá Guardar para usar estos valores.`;
+        progress.done(`<strong>${num.format(r.kcal)} kcal · P ${dec.format(r.protein)} · C ${dec.format(r.carbs)} · G ${dec.format(r.fat)} g</strong> (confianza ${esc(r.confidence)}). ${esc(r.assumptions)} Tocá Guardar para usar estos valores.`);
       } catch (err) {
-        outEl.textContent = AI_MESSAGES[err.code] ?? AI_MESSAGES.network;
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Recalcular con IA';
+        progress.done(aiErrorHtml(err));
       }
+      btn.textContent = 'Recalcular con IA';
     }
   });
   let aiResult = null;
@@ -645,18 +642,14 @@ async function editWorkout(id) {
         return form.note.focus();
       }
       const btn = ev.target.closest('[data-a]');
-      btn.disabled = true;
-      btn.textContent = 'Leyendo la nota...';
+      const progress = aiProgress(btn, out);
       try {
-        const r = await parseWorkout(note, { types: WORKOUT_TYPES, muscles: MUSCLES });
+        const r = await parseWorkout(note, { types: WORKOUT_TYPES, muscles: MUSCLES }, progress.options);
         if (!r.parts.length) throw Object.assign(new Error('empty'), { code: 'parse' });
         applyParsed(r);
-        out.textContent = 'Listo: revisá minutos y calorías antes de guardar.';
+        progress.done('Listo: revisá minutos y calorías antes de guardar.');
       } catch (err) {
-        out.textContent = AI_MESSAGES[err.code] ?? AI_MESSAGES.network;
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Completar desde la nota con IA';
+        progress.done(aiErrorHtml(err));
       }
     }
   });

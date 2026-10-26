@@ -7,7 +7,7 @@ import { COMBOS, nutrientsFor, comboTotals } from './foods.js';
 import { renderFoodEditor } from './food-editor.js';
 import { startScan, lookupBarcode } from './barcode.js';
 import { prepFieldsHtml, readPrep, syncOilEntry } from './prep.js';
-import { estimateNutrition, hasKey, AI_MESSAGES } from './ai.js';
+import { estimateNutrition, hasKey, aiProgress, aiErrorHtml, AI_MESSAGES } from './ai.js';
 import { saveMyFood } from './catalog.js';
 
 const dialog = document.getElementById('add-dialog');
@@ -305,6 +305,7 @@ function showAi(prefill = '') {
         <textarea name="desc" rows="3" maxlength="300" placeholder="Ej.: 1 huevo a la plancha con un poco de oliva; 2 fetas de pan sin TACC; un plato de ensalada de lechuga y tomate">${esc(prefill)}</textarea>
       </label>
       <button type="button" class="secondary" data-a="estimate" ${hasKey() ? '' : 'disabled'}>Calcular</button>
+      <p class="ai-status hint" aria-live="polite"></p>
       <div class="ai-result" aria-live="polite"></div>
     </form>`;
   const form = dialog.querySelector('form');
@@ -315,11 +316,12 @@ function showAi(prefill = '') {
     const desc = form.desc.value.trim();
     if (desc.length < 3) return form.desc.focus();
     const btn = form.querySelector('[data-a="estimate"]');
-    btn.disabled = true;
-    btn.textContent = 'Calculando...';
+    const progress = aiProgress(btn, form.querySelector('.ai-status'));
     out.innerHTML = '';
+    estimate = null;
     try {
-      estimate = { ...(await estimateNutrition(desc)), desc };
+      estimate = { ...(await estimateNutrition(desc, progress.options)), desc };
+      progress.done();
       out.innerHTML = `
         <dl class="portion-preview">
           <div><dt>Energía</dt><dd>${num.format(estimate.kcal)} kcal</dd></div>
@@ -331,11 +333,9 @@ function showAi(prefill = '') {
         <label class="switch"><input type="checkbox" name="save"><span>Guardar en mis alimentos para la próxima</span></label>
         <button class="primary" type="submit">Agregar a ${mealName()}</button>`;
     } catch (err) {
-      out.innerHTML = `<p class="form-error">${esc(AI_MESSAGES[err.code] ?? AI_MESSAGES.network)}</p>${err.detail ? `<p class="hint">Detalle de Google: ${esc(err.detail)}</p>` : ''}`;
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Calcular de nuevo';
+      progress.done(aiErrorHtml(err));
     }
+    btn.textContent = 'Calcular de nuevo';
   };
 
   form.addEventListener('click', (ev) => {
