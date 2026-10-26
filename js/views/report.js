@@ -9,6 +9,8 @@ import { findFood, isProduce } from '../catalog.js';
 import { GOALS, PRODUCE_TARGET_G } from '../goals.js';
 import { INTENSITY } from './day.js';
 import { prepSummary } from '../prep.js';
+import { columns, hbars, macroShares, statTile, dotGrid, weightLine } from '../charts.js';
+import { estimateNutrition, hasKey, AI_MESSAGES } from '../ai.js';
 
 const main = document.getElementById('main');
 
@@ -40,6 +42,7 @@ export function renderReport() {
         <button type="button" class="chip" data-r="csv-foods">${icon.report}<span>CSV por alimento</span></button>
       </div>
       <p class="hint">En la ventana de impresión elegí <strong>Guardar como PDF</strong> como destino.</p>
+      <div class="ai-fill" aria-live="polite"></div>
     </form>
 
     <article class="report" aria-label="Vista previa del informe"><p class="hint">Armando el informe...</p></article>
@@ -69,6 +72,7 @@ export function renderReport() {
     if (r === 'csv-detail') exportCsv('detail');
     if (r === 'csv-days') exportCsv('days');
     if (r === 'csv-foods') exportCsv('foods');
+    if (r === 'ai-fill') fillMissingWithAi();
   });
   paintReport();
 }
@@ -115,6 +119,7 @@ async function paintReport() {
 
   const fmtRange = `${parseKey(from).toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })} al ${parseKey(to).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })}`;
 
+  paintAiFill(days);
   main.querySelector('.report').innerHTML = `
     <header class="report-head">
       <p class="report-kicker">NutriFer · Registro alimentario</p>
@@ -123,8 +128,10 @@ async function paintReport() {
       <p class="muted">Objetivos: ${p.goals.map((g) => GOALS[g]?.label).filter(Boolean).join(', ')}. Meta diaria: ${num.format(t.kcal)} kcal · P ${t.protein} g · C ${t.carbs} g · G ${t.fat} g${p.custom ? ' (indicada por la nutricionista)' : ' (cálculo orientativo)'}.</p>
     </header>
 
+    ${overviewHtml({ days, logged, avg, t, p, weights, meds })}
+
     <section class="report-summary">
-      <h3>Resumen del período</h3>
+      <h3>Datos del período</h3>
       <table>
         <tbody>
           <tr><th scope="row">Días con comidas registradas</th><td>${logged.length} de ${days.length}</td></tr>
@@ -148,6 +155,149 @@ async function paintReport() {
 
     ${days.slice().reverse().map(dayHtml).join('')}
   `;
+}
+
+const dayShort = (key) => {
+  const d = parseKey(key);
+  return `${d.toLocaleDateString('es-AR', { weekday: 'short' }).slice(0, 2)} ${d.getDate()}`;
+};
+
+// The graphic summary at the top of the report.
+function overviewHtml({ days, logged, avg, t, p, weights, meds }) {
+  if (!logged.length) return '<section class="overview"><p class="muted">Todavía no hay comidas registradas en este período.</p></section>';
+  const aP = avg((d) => d.totals.protein);
+  const aC = avg((d) => d.totals.carbs);
+  const aF = avg((d) => d.totals.fat);
+
+  const allEntries = days.flatMap((d) => d.entries);
+  const totalKcal = allEntries.reduce((s, e) => s + e.kcal, 0) || 1;
+  const byMeal = MEALS.map((m) => ({ m, kcal: allEntries.filter((e) => e.meal === m.id).reduce((s, e) => s + e.kcal, 0) }))
+    .filter((x) => x.kcal > 0);
+  const top = analyzeFoods(days).rows.slice(0, 8);
+  const missing = allEntries.filter((e) => e.macrosMissing).length;
+
+  return `
+    <section class="overview">
+      <h3>Panorama</h3>
+      ${missing ? `<p class="notice">${missing} ${missing === 1 ? 'alimento no tiene' : 'alimentos no tienen'} calorías ni macros, así que los totales quedan por debajo de lo real.</p>` : ''}
+      <div class="tiles">
+        ${statTile({ label: 'Energía promedio', value: avg((d) => d.totals.kcal), target: t.kcal, unit: 'kcal', kind: 'kcal' })}
+        ${statTile({ label: 'Proteínas', value: aP, target: t.protein, unit: 'g', kind: 'protein' })}
+        ${statTile({ label: 'Carbohidratos', value: aC, target: t.carbs, unit: 'g', kind: 'carbs' })}
+        ${statTile({ label: 'Grasas', value: aF, target: t.fat, unit: 'g', kind: 'fat' })}
+      </div>
+      <p class="muted chart-note">Promedios de los ${logged.length} ${logged.length === 1 ? 'día' : 'días'} con comidas registradas.</p>
+
+      <div class="chart-block">
+        <h4>Energía por día</h4>
+        ${columns({
+          data: days.map((d) => ({ label: dayShort(d.date), value: d.entries.length ? d.totals.kcal : null })),
+          target: t.kcal, targetLabel: `meta ${num.format(t.kcal)}`, kind: 'kcal', unit: 'kcal',
+        })}
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-block">
+          <h4>De dónde vienen las calorías</h4>
+          ${macroShares([
+            { label: 'Tu promedio', p: aP, c: aC, f: aF },
+            { label: 'Meta', p: t.protein, c: t.carbs, f: t.fat },
+          ])}
+        </div>
+        <div class="chart-block">
+          <h4>Energía por comida</h4>
+          ${hbars(byMeal.map((x) => ({ label: x.m.label, value: x.kcal, valueLabel: `${Math.round((x.kcal * 100) / totalKcal)}%` })))}
+        </div>
+      </div>
+
+      <div class="chart-block">
+        <h4>Alimentos que más energía aportaron</h4>
+        ${hbars(top.map((r) => ({ label: r.name, value: r.kcal, valueLabel: `${num.format(r.kcal)} kcal · ${Math.round(r.share)}%` })), { valueWidth: '8.5em' })}
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-block">
+          <h4>Frutas y verduras por día</h4>
+          ${columns({
+            data: days.map((d) => ({ label: dayShort(d.date), value: d.entries.length ? d.produceG : null })),
+            target: PRODUCE_TARGET_G, targetLabel: `${PRODUCE_TARGET_G} g`, kind: 'produce', unit: 'g',
+          })}
+        </div>
+        <div class="chart-block">
+          <h4>Agua por día</h4>
+          ${columns({
+            data: days.map((d) => ({ label: dayShort(d.date), value: d.waterMl ? d.waterMl / 1000 : null, tip: `${dayShort(d.date)}: ${d.waterMl ? `${dec.format(d.waterMl / 1000)} L` : 'sin registro'}` })),
+            target: p.waterGoalMl / 1000, targetLabel: `${dec.format(p.waterGoalMl / 1000)} L`, kind: 'water', unit: 'L',
+          })}
+        </div>
+      </div>
+
+      ${weights.length >= 2 ? `
+        <div class="chart-block">
+          <h4>Peso</h4>
+          ${weightLine(weights.map((w) => ({ label: dayShort(w.date), kg: w.kg })))}
+        </div>` : ''}
+
+      ${meds.length ? `
+        <div class="chart-block">
+          <h4>Medicación y suplementos</h4>
+          ${dotGrid({
+            days: days.map((d) => ({ short: dayShort(d.date), long: longDate(d.date) })),
+            rows: meds.map((m) => {
+              const cells = days.map((d) => d.meds.some((x) => x.medId === m.id));
+              return { label: m.name, taken: cells.filter(Boolean).length, cells };
+            }),
+          })}
+        </div>` : ''}
+    </section>`;
+}
+
+// ---------- AI fill: estimate every food in the period that has no calories/macros ----------
+
+let fillRunning = false;
+
+function paintAiFill(days) {
+  const box = main.querySelector('.ai-fill');
+  if (!box || fillRunning) return;
+  const missing = days.flatMap((d) => d.entries).filter((e) => e.macrosMissing).length;
+  box.innerHTML = missing
+    ? `<p class="notice">${missing} ${missing === 1 ? 'alimento no tiene' : 'alimentos no tienen'} calorías ni macros en este período.
+        ${hasKey() ? '<button type="button" class="chip strong" data-r="ai-fill">Completar con IA</button>' : '<a href="#/perfil#ai">Conectá Gemini en el Perfil</a> para completarlos.'}</p>`
+    : '';
+}
+
+async function fillMissingWithAi() {
+  if (fillRunning) return;
+  fillRunning = true;
+  const box = main.querySelector('.ai-fill');
+  const { days } = await collect(range.from, range.to);
+  const todo = days.flatMap((d) => d.entries).filter((e) => e.macrosMissing);
+  let done = 0;
+  let failed = 0;
+  let lastError = '';
+  for (const e of todo) {
+    box.innerHTML = `<p class="notice">Calculando con IA ${done + failed + 1} de ${todo.length}: ${esc(e.name)}...</p>`;
+    try {
+      const desc = [`${e.qtyLabel} de ${e.name}`, e.prep?.toLowerCase(), e.itemNote].filter(Boolean).join(', ');
+      const r = await estimateNutrition(desc);
+      await db.put('entries', {
+        ...e,
+        kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat,
+        grams: e.grams ?? r.grams,
+        macrosMissing: false,
+        aiEstimated: true,
+        aiNote: `${r.assumptions} (confianza ${r.confidence})`,
+      });
+      done += 1;
+    } catch (err) {
+      failed += 1;
+      lastError = AI_MESSAGES[err.code] ?? AI_MESSAGES.network;
+      if (['nokey', 'key', 'quota'].includes(err.code)) break;
+    }
+  }
+  fillRunning = false;
+  await paintReport();
+  toast(failed ? `Completados ${done}; ${failed} sin completar. ${lastError}` : `Completados ${done} con IA`);
 }
 
 // Share of energy from protein, carbs and fat (4/4/9 kcal per g), against the target split.

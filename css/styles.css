@@ -11,9 +11,10 @@
   --brand-strong: oklch(0.36 0.12 345);
   --on-brand: oklch(0.99 0.005 345);
   --brand-soft: oklch(0.94 0.03 345);
+  /* macro palette validated with the dataviz checker (light + dark) */
   --protein: oklch(0.5 0.14 345);
-  --carbs: oklch(0.74 0.14 72);
-  --fat: oklch(0.57 0.09 195);
+  --carbs: oklch(0.64 0.14 62);
+  --fat: oklch(0.55 0.12 235);
   --produce: oklch(0.58 0.13 145);
   --water: oklch(0.6 0.11 240);
   --water-soft: oklch(0.93 0.03 240);
@@ -47,9 +48,9 @@
     --brand-strong: oklch(0.85 0.09 345);
     --on-brand: oklch(0.2 0.03 345);
     --brand-soft: oklch(0.3 0.05 345);
-    --protein: oklch(0.72 0.13 345);
-    --carbs: oklch(0.8 0.13 75);
-    --fat: oklch(0.72 0.09 195);
+    --protein: oklch(0.64 0.14 345);
+    --carbs: oklch(0.66 0.14 62);
+    --fat: oklch(0.62 0.12 235);
     --produce: oklch(0.74 0.13 145);
     --water: oklch(0.74 0.1 240);
     --water-soft: oklch(0.32 0.05 240);
@@ -944,6 +945,119 @@ select {
 .report-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 8px; }
 .report-photos img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 8px; }
 .report-line { margin-top: 10px; }
+
+/* ---------- report charts ---------- */
+
+.overview { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+.overview > .notice { margin-top: 10px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 12px; }
+.tile { padding: 12px; border-radius: var(--radius); background: var(--sunken); }
+.tile-label { font-size: 0.8125rem; color: var(--ink-2); }
+.tile-value { margin-top: 2px; font-size: 1.375rem; font-weight: 600; line-height: 1.2; }
+.tile-value span { font-size: 0.8125rem; font-weight: 400; color: var(--ink-2); }
+.tile .meter { height: 6px; margin-top: 8px; background: var(--surface); }
+.tile-sub { margin-top: 4px; font-size: 0.75rem; color: var(--ink-2); }
+.chart-note { margin-top: 6px; font-size: 0.8125rem; }
+.chart-block { margin-top: 22px; break-inside: avoid; }
+.chart-block h4 { margin-bottom: 10px; }
+.chart-grid { display: grid; gap: 0 24px; }
+@media (min-width: 640px) { .chart-grid { grid-template-columns: 1fr 1fr; } }
+
+/* columns: one per day, 4px rounded top, square on the baseline, target as a hairline */
+.cols {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--n), minmax(0, 1fr));
+  align-items: end;
+  gap: 2px;
+  height: 150px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.col { position: relative; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; }
+.col-bar {
+  width: min(100%, 24px);
+  height: var(--h);
+  min-height: 2px;
+  border-radius: 4px 4px 0 0;
+  background: var(--brand);
+}
+.cols-produce .col-bar { background: var(--produce); }
+.cols-water .col-bar { background: var(--water); }
+.col-bar.is-over { background: var(--over); }
+/* going over is only a warning for energy; more fruit, vegetables or water keeps its color */
+.cols-produce .col-bar.is-over { background: var(--produce); }
+.cols-water .col-bar.is-over { background: var(--water); }
+.col-bar.is-empty { height: 2px; background: var(--line); }
+.col-label { position: absolute; bottom: -20px; font-size: 0.6875rem; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cols-target {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(20px + 129px * var(--t)); /* 150px chart - 20px labels - 1px axis */
+  border-top: 1px solid var(--ink-2);
+  pointer-events: none;
+}
+.cols-target span {
+  position: absolute;
+  right: 0;
+  bottom: 2px;
+  padding: 0 4px;
+  background: var(--surface);
+  font-size: 0.6875rem;
+  color: var(--ink-2);
+}
+
+/* horizontal bars: label, bar, value at the tip */
+.hbars { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.hbar { display: grid; grid-template-columns: minmax(84px, 34%) 1fr; align-items: center; gap: 2px 10px; font-size: 0.875rem; }
+.hbar-label { overflow-wrap: anywhere; line-height: 1.25; }
+/* bar and value share the track: the bar takes its share of what the value leaves free */
+.hbar-track { display: grid; grid-template-columns: 1fr var(--vw, 3em); align-items: center; gap: 6px; min-width: 0; }
+.hbar-fill { width: var(--w); min-width: 2px; height: 14px; border-radius: 0 4px 4px 0; background: var(--brand); }
+.hbar-value { color: var(--ink-2); font-size: 0.8125rem; white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; }
+
+/* 100% stacked macro shares with 2px surface gaps */
+.shares { display: flex; flex-direction: column; gap: 10px; }
+.share-row { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 10px; font-size: 0.875rem; }
+.share-bar { display: flex; gap: 2px; height: 22px; }
+.share-seg {
+  width: var(--w);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.share-seg:first-child { border-radius: 4px 0 0 4px; }
+.share-seg:last-child { border-radius: 0 4px 4px 0; }
+.seg-p { background: var(--protein); }
+.seg-c { background: var(--carbs); }
+.seg-f { background: var(--fat); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.8125rem; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.key { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+/* medication grid */
+.dotgrid-wrap { overflow-x: auto; }
+.dotgrid { border-collapse: collapse; font-size: 0.8125rem; }
+.dotgrid th, .dotgrid td { padding: 4px 5px; text-align: center; white-space: nowrap; }
+.dotgrid thead th { color: var(--ink-2); font-weight: 500; font-size: 0.6875rem; }
+.dotgrid tbody th { text-align: left; font-weight: 500; padding-right: 12px; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--line); }
+.dot.on { background: var(--brand); border-color: var(--brand); }
+
+@media print {
+  .dotgrid-wrap { overflow: visible; }
+  .dotgrid { font-size: 8pt; }
+  .dotgrid th, .dotgrid td { padding: 2px 3px; }
+  .tiles { grid-template-columns: repeat(4, 1fr); }
+  .chart-grid { grid-template-columns: 1fr 1fr; }
+  .chart-block, .tile { break-inside: avoid; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
 
 @media print {
   @page { margin: 14mm 12mm; }
