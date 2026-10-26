@@ -7,7 +7,7 @@ import {
 } from '../util.js';
 import { findFood, isProduce } from '../catalog.js';
 import { PRODUCE_TARGET_G, BOTTLE_ML, targetsForDay } from '../goals.js';
-import { WORKOUT_TYPES, INTENSITY, INTENSITY_HINTS, MUSCLES, workoutParts, workoutSummary, dayActivity, partLabel } from '../activity.js';
+import { WORKOUT_TYPES, MUSCLES, ratesFor, kcalFromRate, workoutSummary, dayActivity, partLabel } from '../activity.js';
 import { openAddFood } from '../add-food.js';
 import { compressPhoto } from '../photos.js';
 import { prepFieldsHtml, readPrep, prepSummary, syncOilEntry } from '../prep.js';
@@ -47,8 +47,8 @@ export async function renderDay() {
   const dayMonth = d.toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
 
   const p = state.profile;
-  const activity = dayActivity(workouts, p.weightKg);
-  const t = targetsForDay(p, activity.kcal);
+  const activity = dayActivity(workouts, p);
+  const t = targetsForDay(p, activity.totalKcal);
   const totals = sumMacros(entries);
   const left = t.kcal - totals.kcal;
   const produceG = entries.reduce((s, e) => s + (isProduce(findFood(e.foodId)) ? e.grams ?? 0 : 0), 0);
@@ -79,7 +79,7 @@ export async function renderDay() {
             ? `Te quedan <strong>${num.format(left)} kcal</strong>.`
             : `Pasaste la meta por <strong>${num.format(-left)} kcal</strong>.`
       }</p>
-      ${activity.minutes ? `<p class="budget-activity">Actividad: ${num.format(activity.minutes)} min, ~${num.format(activity.totalKcal)} kcal en total. ${p.custom ? 'Tu meta es la de tu nutricionista y no cambia.' : `${num.format(activity.kcal)} kcal extra sobre el reposo ya están sumadas a la meta (base ${num.format(p.targets.kcal)}).`}</p>` : ''}
+      ${activity.minutes ? `<p class="budget-activity">Actividad: ${num.format(activity.minutes)} min, <strong>${num.format(activity.totalKcal)} kcal gastadas</strong>${p.custom ? '. Tu meta es la de tu nutricionista y no cambia.' : ', sumadas a la meta de hoy.'}</p>` : ''}
       <dl class="macros">
         ${macroRow('Proteínas', totals.protein, t.protein, 'g', 'protein')}
         ${macroRow('Carbohidratos', totals.carbs, t.carbs, 'g', 'carbs')}
@@ -107,7 +107,7 @@ export async function renderDay() {
       ${unscheduledMedsBlock(meds, medlog)}
     </div>
 
-    ${workoutsBlock(workouts.sort((a, b) => a.createdAt - b.createdAt), p.weightKg)}
+    ${workoutsBlock(workouts.sort((a, b) => a.createdAt - b.createdAt), p)}
   `;
 }
 
@@ -483,18 +483,18 @@ photoDialog.addEventListener('click', async (ev) => {
 
 // ---------- activity ----------
 
-function workoutsBlock(workouts, kg) {
-  const total = dayActivity(workouts, kg);
+function workoutsBlock(workouts, profile) {
+  const total = dayActivity(workouts, profile);
   return `
     <section class="activity" aria-labelledby="activity-title">
       <header class="meal-head">
         <h2 id="activity-title">Actividad física</h2>
-        ${workouts.length ? `<span class="meal-kcal">${num.format(total.minutes)} min · ~${num.format(total.totalKcal)} kcal</span>` : ''}
+        ${workouts.length ? `<span class="meal-kcal">${num.format(total.minutes)} min · ${num.format(total.totalKcal)} kcal</span>` : ''}
       </header>
       ${workouts.length ? `
         <ul class="items" role="list">
           ${workouts.map((w) => {
-            const s = workoutSummary(w, kg);
+            const s = workoutSummary(w, profile);
             return `
             <li class="item">
               <button class="item-main" data-action="edit-workout" data-id="${w.id}" aria-label="Editar actividad">
@@ -507,34 +507,31 @@ function workoutsBlock(workouts, kg) {
               <span></span>
             </li>`;
           }).join('')}
-        </ul>
-        <p class="tracker-note">Gasto total estimado con tu peso (${dec.format(kg)} kg), comparable con lo que marca una cinta o un reloj. De eso, ${num.format(total.kcal)} kcal son extra sobre el reposo: esa parte se suma a tu meta del día.</p>` : '<p class="tracker-note">¿Fuiste al gimnasio o hiciste otra actividad? Registrala acá: suma a tu meta del día.</p>'}
+        </ul>` : '<p class="tracker-note">¿Fuiste al gimnasio o hiciste otra actividad? Registrala acá: suma a tu meta del día.</p>'}
       <div class="meal-actions">
         <button class="chip" data-action="edit-workout">${icon.plus}<span>Actividad</span></button>
       </div>
     </section>`;
 }
 
-function partRowHtml(type, part) {
+function partRowHtml(type, part, rate) {
   const on = !!part;
+  const auto = !part || !(part.kcal > 0) || part.kcal === kcalFromRate(rate, part.minutes);
   return `
-    <li class="part-row${on ? '' : ' is-off'}" data-type="${esc(type)}">
+    <li class="part-row${on ? '' : ' is-off'}" data-type="${esc(type)}" data-rate="${rate}">
       <label class="part-check"><input type="checkbox" name="part-on" value="${esc(type)}" ${on ? 'checked' : ''}><span>${esc(type)}</span></label>
       <span class="part-fields" ${on ? '' : 'hidden'}>
-        <label class="part-min"><span class="visually-hidden">Minutos de ${esc(type)}</span><input name="part-min" type="number" inputmode="numeric" min="1" max="600" value="${part?.minutes ?? ''}" placeholder="min"><span aria-hidden="true">min</span></label>
-        <select name="part-int" aria-label="Intensidad de ${esc(type)}">
-          ${Object.entries(INTENSITY).map(([k, label]) => `<option value="${k}" ${(part?.intensity ?? 'mid') === k ? 'selected' : ''}>${label}</option>`).join('')}
-        </select>
-        <label class="part-kcal"><span class="visually-hidden">Calorías que marcó el aparato para ${esc(type)}</span><input name="part-kcal" type="number" inputmode="numeric" min="1" max="3000" value="${part?.deviceKcal ?? ''}" placeholder="kcal"><span aria-hidden="true">del aparato</span></label>
+        <label class="part-num"><input name="part-min" type="number" inputmode="numeric" min="1" max="600" value="${part?.minutes ?? ''}" aria-label="Minutos de ${esc(type)}"><span>min</span></label>
+        <label class="part-num"><input name="part-kcal" type="number" inputmode="numeric" min="0" max="5000" value="${part ? part.kcal : ''}" data-auto="${auto ? '1' : ''}" aria-label="Calorías de ${esc(type)}"><span>kcal</span></label>
       </span>
-      ${INTENSITY_HINTS[type] ? `<p class="part-hint" ${on ? '' : 'hidden'}>${esc(INTENSITY_HINTS[type])}</p>` : ''}
     </li>`;
 }
 
 async function editWorkout(id) {
   const w = id ? await db.get('workouts', id) : null;
-  const kg = state.profile.weightKg;
-  const parts = w ? workoutParts(w) : [];
+  const profile = state.profile;
+  const rates = ratesFor(profile);
+  const parts = w ? workoutSummary(w, profile).parts : [];
   const partOf = (type) => parts.find((x) => x.type === type);
   sheet.innerHTML = `
     <form class="sheet-body">
@@ -542,15 +539,11 @@ async function editWorkout(id) {
         <h2 id="add-title">${w ? 'Editar actividad' : 'Agregar actividad'}</h2>
         <button type="button" class="icon-btn" data-a="close" aria-label="Cerrar">${icon.close}</button>
       </header>
-      <label class="field"><span>Contá qué hiciste <span class="muted">(opcional, la IA lo puede ordenar)</span></span>
-        <textarea name="note" rows="3" maxlength="300" placeholder="Ej.: 75 min de pesas de piernas y glúteos, después 45 min de cinta caminando rápido">${esc(w?.note ?? '')}</textarea>
-      </label>
-      <button type="button" class="secondary" data-a="ai">Completar desde la nota con IA</button>
-      <p class="ai-out hint" aria-live="polite"></p>
 
       <fieldset class="parts">
-        <legend>Actividades, minutos e intensidad</legend>
-        <ul class="part-list" role="list">${WORKOUT_TYPES.map((tp) => partRowHtml(tp, partOf(tp))).join('')}</ul>
+        <legend>Qué hiciste: minutos y calorías de cada actividad</legend>
+        <p class="hint">Las calorías se completan con tu referencia por hora (Cinta: ${num.format(rates.Cinta)} kcal/h). Si la cinta o el reloj marcó otro número, escribilo.</p>
+        <ul class="part-list" role="list">${WORKOUT_TYPES.map((tp) => partRowHtml(tp, partOf(tp), rates[tp])).join('')}</ul>
       </fieldset>
 
       <fieldset class="segmented wrap compact-pills muscles" ${partOf('Musculación') ? '' : 'hidden'}>
@@ -558,11 +551,18 @@ async function editWorkout(id) {
         ${MUSCLES.map((m) => `<label><input type="checkbox" name="muscles" value="${m}" ${w?.muscles?.includes(m) ? 'checked' : ''}><span>${m}</span></label>`).join('')}
       </fieldset>
 
+      <p class="workout-total"></p>
+
+      <label class="field"><span>Nota <span class="muted">(opcional)</span></span>
+        <textarea name="note" rows="2" maxlength="300" placeholder="Ej.: piernas y glúteos con profe; cinta a 6 km/h con inclinación">${esc(w?.note ?? '')}</textarea>
+      </label>
+      <button type="button" class="secondary" data-a="ai">Completar desde la nota con IA</button>
+      <p class="ai-out hint" aria-live="polite"></p>
+
       <div class="field-grid">
         <label class="field"><span>Detalle <span class="muted">(opcional)</span></span><input name="detail" maxlength="80" value="${esc(w?.detail ?? '')}" placeholder="Ej.: piernas + cinta"></label>
         <label class="field"><span>Hora</span><input name="time" type="time" value="${esc(w?.time ?? (state.currentDate === todayKey() ? nowTime() : ''))}"></label>
       </div>
-      <p class="workout-total"></p>
       <button class="primary" type="submit">${w ? 'Guardar cambios' : 'Agregar actividad'}</button>
       ${w ? '<button type="button" class="ghost danger-text" data-a="delete">Borrar actividad</button>' : ''}
     </form>`;
@@ -573,33 +573,54 @@ async function editWorkout(id) {
     .map((row) => ({
       type: row.dataset.type,
       minutes: parseInt(row.querySelector('[name="part-min"]').value, 10) || 0,
-      intensity: row.querySelector('[name="part-int"]').value,
-      ...(parseInt(row.querySelector('[name="part-kcal"]').value, 10) > 0 ? { deviceKcal: parseInt(row.querySelector('[name="part-kcal"]').value, 10) } : {}),
+      kcal: parseInt(row.querySelector('[name="part-kcal"]').value, 10) || 0,
     }));
+
+  // Calories follow the minutes until the user types their own number.
+  const syncAutoKcal = (row) => {
+    const kcalInput = row.querySelector('[name="part-kcal"]');
+    if (!kcalInput.dataset.auto) return;
+    const minutes = parseInt(row.querySelector('[name="part-min"]').value, 10) || 0;
+    kcalInput.value = minutes ? kcalFromRate(Number(row.dataset.rate), minutes) : '';
+  };
 
   const paint = () => {
     form.querySelectorAll('.part-row').forEach((row) => {
       const on = row.querySelector('[name="part-on"]').checked;
       row.classList.toggle('is-off', !on);
       row.querySelector('.part-fields').hidden = !on;
-      const hint = row.querySelector('.part-hint');
-      if (hint) hint.hidden = !on;
     });
-    form.querySelector('.muscles').hidden = !readParts().some((x) => x.type === 'Musculación');
-    const s = workoutSummary({ parts: readParts() }, kg);
+    const chosen = readParts();
+    form.querySelector('.muscles').hidden = !chosen.some((x) => x.type === 'Musculación');
+    const s = workoutSummary({ parts: chosen }, profile);
     form.querySelector('.workout-total').innerHTML = s.minutes
-      ? `<strong>${num.format(s.minutes)} min · ~${num.format(s.totalKcal)} kcal en total</strong><br><span class="muted">${num.format(s.kcal)} kcal extra sobre el reposo se suman a tu meta del día.${s.fromDevice ? ' Incluye lo que marcó el aparato.' : ' Si la cinta o el reloj te dio un número, cargalo en "del aparato".'}</span>`
-      : '<span class="muted">Marcá al menos una actividad con sus minutos.</span>';
+      ? `<strong>Total: ${num.format(s.minutes)} min · ${num.format(s.totalKcal)} kcal gastadas</strong>`
+      : '<span class="muted">Marcá cada actividad que hiciste con sus minutos.</span>';
   };
+
+  form.addEventListener('input', (ev) => {
+    const row = ev.target.closest('.part-row');
+    if (row) {
+      if (ev.target.name === 'part-kcal') ev.target.dataset.auto = '';
+      if (ev.target.name === 'part-min' || ev.target.name === 'part-on') syncAutoKcal(row);
+      if (ev.target.name === 'part-on' && ev.target.checked) row.querySelector('[name="part-min"]').focus();
+    }
+    paint();
+  });
 
   const applyParsed = (r) => {
     form.querySelectorAll('.part-row').forEach((row) => {
       const part = r.parts.find((x) => x.type === row.dataset.type);
       row.querySelector('[name="part-on"]').checked = !!part;
-      if (part) {
-        row.querySelector('[name="part-min"]').value = part.minutes;
-        row.querySelector('[name="part-int"]').value = part.intensity;
-        row.querySelector('[name="part-kcal"]').value = part.deviceKcal ?? '';
+      if (!part) return;
+      row.querySelector('[name="part-min"]').value = part.minutes;
+      const kcalInput = row.querySelector('[name="part-kcal"]');
+      if (part.kcal > 0) {
+        kcalInput.value = part.kcal;
+        kcalInput.dataset.auto = '';
+      } else {
+        kcalInput.dataset.auto = '1';
+        syncAutoKcal(row);
       }
     });
     form.querySelectorAll('[name="muscles"]').forEach((c) => { c.checked = r.muscles.includes(c.value); });
@@ -607,7 +628,6 @@ async function editWorkout(id) {
     paint();
   };
 
-  form.addEventListener('input', paint);
   form.addEventListener('click', async (ev) => {
     const a = ev.target.closest('[data-a]')?.dataset.a;
     if (a === 'close') sheet.close();
@@ -628,11 +648,10 @@ async function editWorkout(id) {
       btn.disabled = true;
       btn.textContent = 'Leyendo la nota...';
       try {
-        const totalMinutes = readParts().reduce((s, x) => s + x.minutes, 0) || null;
-        const r = await parseWorkout(note, { types: WORKOUT_TYPES, muscles: MUSCLES, totalMinutes });
+        const r = await parseWorkout(note, { types: WORKOUT_TYPES, muscles: MUSCLES });
         if (!r.parts.length) throw Object.assign(new Error('empty'), { code: 'parse' });
         applyParsed(r);
-        out.textContent = 'Listo: revisá los minutos y la intensidad antes de guardar.';
+        out.textContent = 'Listo: revisá minutos y calorías antes de guardar.';
       } catch (err) {
         out.textContent = AI_MESSAGES[err.code] ?? AI_MESSAGES.network;
       } finally {
@@ -648,26 +667,26 @@ async function editWorkout(id) {
     const muscles = chosen.some((x) => x.type === 'Musculación')
       ? [...form.querySelectorAll('[name="muscles"]:checked')].map((c) => c.value)
       : [];
-    const s = workoutSummary({ parts: chosen }, kg);
+    const s = workoutSummary({ parts: chosen }, profile);
     await db.put('workouts', {
       id: w?.id ?? db.newId(),
       date: state.currentDate,
       createdAt: w?.createdAt ?? Date.now(),
-      parts: chosen,
+      parts: s.parts,
       muscles,
       // flat fields kept for the CSV and older readers
-      types: chosen.map((x) => x.type),
-      type: chosen.map((x) => x.type).join(' + '),
+      types: s.parts.map((x) => x.type),
+      type: s.parts.map((x) => x.type).join(' + '),
       minutes: s.minutes,
-      kcal: s.kcal,
       totalKcal: s.totalKcal,
+      kcal: s.kcal,
       detail: form.detail.value.trim(),
       time: form.time.value,
       note: form.note.value.trim(),
     });
     sheet.close();
     await renderDay();
-    toast(`${w ? 'Actividad actualizada' : 'Actividad registrada'}: ~${num.format(s.totalKcal)} kcal`);
+    toast(`${w ? 'Actividad actualizada' : 'Actividad registrada'}: ${num.format(s.totalKcal)} kcal`);
   });
   paint();
   sheet.showModal();

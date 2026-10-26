@@ -1,73 +1,77 @@
-// Physical activity: energy estimate by METs and muscle groups worked.
-// MET values approximated from the Compendium of Physical Activities (Ainsworth et al.).
-// Two numbers per activity:
-//   total = MET × kg × hours: what a treadmill or a watch shows (includes the resting burn).
-//   extra = (MET − 1) × kg × hours: what exercise adds over rest. Only this goes onto the daily
-//           target, because the base target already covers the resting burn.
-// When the machine or watch reading is known, it replaces the MET estimate as the total.
-
-export const INTENSITY = { low: 'Suave', mid: 'Moderada', high: 'Intensa' };
+// Physical activity: minutes and calories burned per activity, plus muscle groups worked.
+// Each activity has a personal reference in kcal per hour (editable in the profile; the treadmill
+// one comes from Fernanda's own reading). Logging fills calories from it and they can be corrected.
+// Defaults for the rest come from the Compendium of Physical Activities (MET × kg).
+//
+// The calories logged for each activity are the only reference: they are shown as they are and
+// added as they are to that day's target.
 
 export const ACTIVITIES = {
-  'Musculación': { low: 3.5, mid: 5, high: 6 },
-  'Caminata': { low: 3, mid: 4.3, high: 6 },
-  'Cardio': { low: 5, mid: 7, high: 8.5 },
-  'Pádel': { low: 5, mid: 6, high: 7.3 },
-  'Biodanza': { low: 4, mid: 5, high: 6 },
-  'Pilates o yoga': { low: 2.5, mid: 3, high: 4 },
-  'Otro': { low: 3, mid: 4, high: 5.5 },
+  'Cinta': { met: 5.2, fixedKcalPerHour: 400 },
+  'Musculación': { met: 5 },
+  'Caminata al aire libre': { met: 4.3 },
+  'Cardio (bici, elíptico)': { met: 7 },
+  'Pádel': { met: 6 },
+  'Biodanza': { met: 5 },
+  'Pilates o yoga': { met: 3 },
+  'Otro': { met: 4 },
 };
 export const WORKOUT_TYPES = Object.keys(ACTIVITIES);
 
-export const INTENSITY_HINTS = {
-  'Caminata': 'Suave: hasta 4,5 km/h. Moderada: 5 a 6 km/h. Intensa: más rápido o con inclinación.',
-  'Musculación': 'Suave: pesos livianos y pausas largas. Moderada: series exigentes. Intensa: pesos altos o circuito sin pausa.',
-  'Cardio': 'Suave: podés hablar cómoda. Moderada: hablás entrecortado. Intensa: casi no podés hablar.',
-};
+// Names used before the treadmill had its own entry.
+const LEGACY_TYPES = { 'Caminata': 'Caminata al aire libre', 'Cardio': 'Cardio (bici, elíptico)' };
+const typeOf = (t) => LEGACY_TYPES[t] ?? (ACTIVITIES[t] ? t : 'Otro');
+
+// Older records also carried an intensity per activity.
+const LEGACY_INTENSITY_FACTOR = { low: 0.75, mid: 1, high: 1.25 };
 
 export const MUSCLES = ['Piernas', 'Glúteos', 'Espalda', 'Pecho', 'Hombros', 'Brazos', 'Abdomen y core', 'Cuerpo completo'];
 
-export function partEnergy({ type, minutes, intensity, deviceKcal }, kg) {
-  const hours = (minutes || 0) / 60;
-  const resting = kg * hours; // 1 MET
-  if (deviceKcal > 0) return { total: Math.round(deviceKcal), extra: Math.max(0, Math.round(deviceKcal - resting)) };
-  const met = ACTIVITIES[type]?.[intensity] ?? ACTIVITIES.Otro.mid;
-  return { total: Math.round(met * kg * hours), extra: Math.max(0, Math.round((met - 1) * kg * hours)) };
+export function defaultRates(kg) {
+  return Object.fromEntries(Object.entries(ACTIVITIES).map(([type, a]) => [type, a.fixedKcalPerHour ?? Math.round((a.met * kg) / 5) * 5]));
 }
 
-// Older records kept one type list, total minutes and one intensity for the whole session.
+// The user's reference kcal/hour per activity (profile overrides on top of the defaults).
+export function ratesFor(profile) {
+  return { ...defaultRates(profile.weightKg), ...(profile.activityRates ?? {}) };
+}
+
+export const kcalFromRate = (rate, minutes) => Math.round((rate * (minutes || 0)) / 60);
+
+// Total burned by one activity: what was logged, or the reference rate for those minutes.
+export function partKcal(part, rates) {
+  if (part.kcal > 0) return Math.round(part.kcal);
+  if (part.deviceKcal > 0) return Math.round(part.deviceKcal);
+  const base = kcalFromRate(rates[typeOf(part.type)] ?? rates.Otro, part.minutes);
+  return Math.round(base * (LEGACY_INTENSITY_FACTOR[part.intensity] ?? 1));
+}
+
 export function workoutParts(w) {
-  if (w.parts?.length) return w.parts;
-  const types = w.types ?? (w.type ? w.type.split(' + ') : ['Otro']);
-  const each = Math.round((w.minutes || 0) / types.length);
-  return types.map((type) => ({ type: ACTIVITIES[type] ? type : 'Otro', minutes: each, intensity: w.intensity ?? 'mid' }));
+  const parts = w.parts?.length
+    ? w.parts
+    : (w.types ?? (w.type ? w.type.split(' + ') : ['Otro'])).map((type, _, all) => ({
+      type, minutes: Math.round((w.minutes || 0) / all.length), intensity: w.intensity ?? 'mid',
+    }));
+  return parts.map((p) => ({ ...p, type: typeOf(p.type) }));
 }
 
-// kcal = extra over rest (goes to the target); totalKcal = comparable to a machine reading.
-export function workoutSummary(w, kg) {
-  const parts = workoutParts(w);
+export function workoutSummary(w, profile) {
+  const rates = ratesFor(profile);
+  const parts = workoutParts(w).map((p) => ({ ...p, kcal: partKcal(p, rates) }));
   const minutes = parts.reduce((s, p) => s + (p.minutes || 0), 0);
-  const energy = parts.map((p) => partEnergy(p, kg));
-  return {
-    parts,
-    minutes,
-    kcal: energy.reduce((s, e) => s + e.extra, 0),
-    totalKcal: energy.reduce((s, e) => s + e.total, 0),
-    muscles: w.muscles ?? [],
-    fromDevice: parts.some((p) => p.deviceKcal > 0),
-  };
+  const totalKcal = parts.reduce((s, p) => s + p.kcal, 0);
+  return { parts, minutes, totalKcal, muscles: w.muscles ?? [] };
 }
 
-export function dayActivity(workouts, kg) {
+export function dayActivity(workouts, profile) {
   return workouts.reduce((acc, w) => {
-    const s = workoutSummary(w, kg);
+    const s = workoutSummary(w, profile);
     return {
       minutes: acc.minutes + s.minutes,
-      kcal: acc.kcal + s.kcal,
       totalKcal: acc.totalKcal + s.totalKcal,
       sessions: acc.sessions + 1,
     };
-  }, { minutes: 0, kcal: 0, totalKcal: 0, sessions: 0 });
+  }, { minutes: 0, totalKcal: 0, sessions: 0 });
 }
 
-export const partLabel = (p) => `${p.type} ${p.minutes} min${p.intensity ? ` (${INTENSITY[p.intensity].toLowerCase()})` : ''}${p.deviceKcal > 0 ? `, ${p.deviceKcal} kcal según el aparato` : ''}`;
+export const partLabel = (p) => `${p.type} ${p.minutes} min, ${p.kcal} kcal`;

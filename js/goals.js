@@ -1,5 +1,5 @@
-// Orientative targets: Mifflin-St Jeor BMR x 1.2 (a day of ordinary life, no exercise),
-// plus the exercise actually logged that day, all adjusted by the weight goal.
+// Orientative targets: Mifflin-St Jeor BMR x 1.2 for ordinary daily life, adjusted by the weight
+// goal, plus the calories of the activity logged that day exactly as logged.
 // The nutritionist's numbers always win: when the profile uses them they stay fixed.
 
 const DAILY_LIFE_FACTOR = 1.2;
@@ -28,18 +28,19 @@ function weightStrategy(goals) {
   return { kcalFactor: 1, proteinPerKg: 1.4 };
 }
 
-// exerciseKcal: energy of the activity logged that day (0 = rest day, the base target).
+// exerciseKcal: calories of the activity logged that day.
 export function computeTargets({ sex, age, heightCm, weightKg, goals }, exerciseKcal = 0) {
   const { kcalFactor, proteinPerKg } = weightStrategy(goals);
   const bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + (sex === 'male' ? 5 : -161);
-  const kcal = Math.round(((bmr * DAILY_LIFE_FACTOR + exerciseKcal) * kcalFactor) / 10) * 10;
+  // The activity's calories are added exactly as logged, on top of the goal-adjusted target.
+  const kcal = Math.round((bmr * DAILY_LIFE_FACTOR * kcalFactor + exerciseKcal) / 10) * 10;
   const protein = Math.round(weightKg * proteinPerKg);
   const fat = Math.round((kcal * FAT_SHARE) / 9);
   const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
   return { kcal, protein, carbs, fat };
 }
 
-// The target for one day: the nutritionist's fixed numbers, or the base plus that day's exercise.
+// The target for one day: the nutritionist's fixed numbers, or the daily target plus that day's activity.
 export function targetsForDay(profile, exerciseKcal = 0) {
   if (profile.custom || !exerciseKcal) return profile.targets;
   return computeTargets(profile, exerciseKcal);

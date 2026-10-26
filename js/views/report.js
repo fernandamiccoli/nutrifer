@@ -101,11 +101,11 @@ async function collect(from, to) {
       meds: medlog.filter((l) => l.date === date && l.taken).map((l) => ({ ...l, med: meds.find((m) => m.id === l.medId) })),
       workouts: workouts.filter((w) => w.date === date),
       weight: weights.find((w) => w.date === date)?.kg,
-      activity: dayActivity(workouts.filter((w) => w.date === date), state.profile.weightKg),
+      activity: dayActivity(workouts.filter((w) => w.date === date), state.profile),
     };
   });
   // Each day's target includes the activity actually logged that day.
-  for (const d of days) d.target = targetsForDay(state.profile, d.activity.kcal);
+  for (const d of days) d.target = targetsForDay(state.profile, d.activity.totalKcal);
   return { days, meds: sortMeds(meds.filter((m) => !m.deleted)), weights: weights.sort((a, b) => a.date.localeCompare(b.date)) };
 }
 
@@ -116,7 +116,7 @@ async function paintReport() {
   const logged = days.filter((d) => d.entries.length);
   const avg = (fn, list = logged) => (list.length ? list.reduce((s, d) => s + fn(d), 0) / list.length : 0);
   const p = state.profile;
-  const t = p.targets; // base target (a day without exercise)
+  const t = p.targets;
   const dayT = (k) => avg((d) => d.target[k]);
   const avgT = logged.length ? { kcal: dayT('kcal'), protein: dayT('protein'), carbs: dayT('carbs'), fat: dayT('fat') } : t;
   const waterDays = days.filter((d) => d.waterMl > 0);
@@ -130,7 +130,7 @@ async function paintReport() {
       <p class="report-kicker">NutriFer · Registro alimentario</p>
       <h2>${esc(p.name || 'Mi registro')}</h2>
       <p>Del ${fmtRange} · ${days.length} días · generado el ${new Date().toLocaleDateString('es-AR')}${p.nutritionist ? ` · para ${esc(p.nutritionist)}` : ''}</p>
-      <p class="muted">Objetivos: ${p.goals.map((g) => GOALS[g]?.label).filter(Boolean).join(', ')}. Meta base: ${num.format(t.kcal)} kcal · P ${t.protein} g · C ${t.carbs} g · G ${t.fat} g${p.custom ? ' (indicada por la nutricionista)' : ' (cálculo orientativo para un día sin ejercicio; cada día suma la actividad registrada)'}.</p>
+      <p class="muted">Objetivos: ${p.goals.map((g) => GOALS[g]?.label).filter(Boolean).join(', ')}. Meta diaria: ${num.format(t.kcal)} kcal · P ${t.protein} g · C ${t.carbs} g · G ${t.fat} g${p.custom ? ' (indicada por la nutricionista)' : ' (cálculo orientativo; los días con actividad se le suman las calorías cargadas)'}.</p>
     </header>
 
     ${overviewHtml({ days, logged, avg, t: avgT, p, weights, meds })}
@@ -146,8 +146,8 @@ async function paintReport() {
           <tr><th scope="row">Frutas y verduras</th><td>${num.format(avg((d) => d.produceG))} g por día <span class="muted">(referencia OMS: ${PRODUCE_TARGET_G} g)</span></td></tr>
           <tr><th scope="row">Agua</th><td>${waterDays.length ? `${dec.format(avg((d) => d.waterMl, waterDays) / 1000)} L por día en ${waterDays.length} días registrados` : 'Sin registro'}</td></tr>
           <tr><th scope="row">Peso</th><td>${weights.length ? (weights.length > 1 ? `${dec.format(weights[0].kg)} → ${dec.format(weights.at(-1).kg)} kg (${weights.at(-1).kg - weights[0].kg > 0 ? '+' : ''}${dec.format(weights.at(-1).kg - weights[0].kg)} kg)` : `${dec.format(weights[0].kg)} kg`) : 'Sin registro'}</td></tr>
-          <tr><th scope="row">Actividad física</th><td>${workoutList.length ? `${workoutList.length} ${workoutList.length === 1 ? 'sesión' : 'sesiones'}, ${num.format(days.reduce((s, d) => s + d.activity.minutes, 0))} min, ~${num.format(days.reduce((s, d) => s + d.activity.totalKcal, 0))} kcal en total (${num.format(days.reduce((s, d) => s + d.activity.kcal, 0))} extra sobre el reposo, sumadas a las metas)` : 'Sin registro'}</td></tr>
-          <tr><th scope="row">Meta de energía</th><td>${p.custom ? `${num.format(t.kcal)} kcal fijas (plan de la nutricionista)` : `${num.format(t.kcal)} kcal en días sin ejercicio; promedio con la actividad registrada: ${num.format(avgT.kcal)} kcal`}</td></tr>
+          <tr><th scope="row">Actividad física</th><td>${workoutList.length ? `${workoutList.length} ${workoutList.length === 1 ? 'sesión' : 'sesiones'}, ${num.format(days.reduce((s, d) => s + d.activity.minutes, 0))} min, ${num.format(days.reduce((s, d) => s + d.activity.totalKcal, 0))} kcal gastadas` : 'Sin registro'}</td></tr>
+          <tr><th scope="row">Meta de energía</th><td>${p.custom ? `${num.format(t.kcal)} kcal fijas (plan de la nutricionista)` : `promedio ${num.format(avgT.kcal)} kcal por día (incluye las calorías de la actividad cargada)`}</td></tr>
         </tbody>
       </table>
       ${meds.length ? `
@@ -199,7 +199,7 @@ function overviewHtml({ days, logged, avg, t, p, weights, meds }) {
         ${columns({
           data: days.map((d) => ({
             label: dayShort(d.date), value: d.entries.length ? d.totals.kcal : null, target: d.target.kcal,
-            tip: `${dayShort(d.date)}: ${d.entries.length ? `${num.format(d.totals.kcal)} kcal` : 'sin registro'} de ${num.format(d.target.kcal)}${d.activity.kcal ? ` (suma ${num.format(d.activity.kcal)} kcal por actividad)` : ''}`,
+            tip: `${dayShort(d.date)}: ${d.entries.length ? `${num.format(d.totals.kcal)} kcal` : 'sin registro'} de ${num.format(d.target.kcal)}${d.activity.totalKcal ? ` (incluye ${num.format(d.activity.totalKcal)} kcal de actividad)` : ''}`,
           })),
           kind: 'kcal', unit: 'kcal',
         })}
@@ -266,11 +266,10 @@ function overviewHtml({ days, logged, avg, t, p, weights, meds }) {
 function activityChartsHtml(days) {
   const sessions = days.flatMap((d) => d.workouts);
   if (!sessions.length) return '';
-  const kg = state.profile.weightKg;
   const muscles = {};
-  for (const w of sessions) for (const m of workoutSummary(w, kg).muscles) muscles[m] = (muscles[m] ?? 0) + 1;
+  for (const w of sessions) for (const m of workoutSummary(w, state.profile).muscles) muscles[m] = (muscles[m] ?? 0) + 1;
   const byType = {};
-  for (const w of sessions) for (const part of workoutSummary(w, kg).parts) byType[part.type] = (byType[part.type] ?? 0) + part.minutes;
+  for (const w of sessions) for (const part of workoutSummary(w, state.profile).parts) byType[part.type] = (byType[part.type] ?? 0) + part.minutes;
   return `
     <div class="chart-grid">
       <div class="chart-block">
@@ -278,7 +277,7 @@ function activityChartsHtml(days) {
         ${columns({
           data: days.map((d) => ({
             label: dayShort(d.date), value: d.activity.minutes || null,
-            tip: `${dayShort(d.date)}: ${d.activity.minutes ? `${num.format(d.activity.minutes)} min, ~${num.format(d.activity.totalKcal)} kcal` : 'sin actividad'}`,
+            tip: `${dayShort(d.date)}: ${d.activity.minutes ? `${num.format(d.activity.minutes)} min, ${num.format(d.activity.totalKcal)} kcal` : 'sin actividad'}`,
           })),
           kind: 'activity', unit: 'min',
         })}
@@ -454,8 +453,8 @@ function dayHtml(d) {
           </div>`;
       }).join('')}
       ${d.meds.length ? `<p class="report-line"><strong>Medicación y suplementos:</strong> ${medsByMoment(d.meds).map(([label, names]) => `${esc(label)}: ${names.map(esc).join(', ')}`).join('; ')}</p>` : ''}
-      ${d.workouts.length ? `<p class="report-line"><strong>Actividad (~${num.format(d.activity.totalKcal)} kcal en total):</strong> ${d.workouts.map((w) => {
-        const s = workoutSummary(w, state.profile.weightKg);
+      ${d.workouts.length ? `<p class="report-line"><strong>Actividad (${num.format(d.activity.totalKcal)} kcal):</strong> ${d.workouts.map((w) => {
+        const s = workoutSummary(w, state.profile);
         return `${esc(s.parts.map(partLabel).join(' + '))}${w.detail ? ` (${esc(w.detail)})` : ''}${s.muscles.length ? `; músculos: ${esc(s.muscles.join(', '))}` : ''}${w.note ? `; ${esc(w.note)}` : ''}`;
       }).join('. ')}</p>` : ''}
     </section>`;
@@ -489,16 +488,15 @@ async function exportCsv(kind) {
         [r.missingMacros ? 'sin macros' : '', r.gluten ? 'con TACC' : ''].filter(Boolean).join(', ')]);
     }
   } else {
-    rows = [['Fecha', 'kcal', 'Proteínas (g)', 'Carbohidratos (g)', 'Grasas (g)', 'Frutas y verduras (g)', 'Agua (L)', 'Actividad (min)', 'Gasto total actividad (kcal)', 'Extra sobre reposo (kcal)', 'Meta del día (kcal)', 'Actividad', 'Músculos', 'Medicación tomada', 'Peso (kg)']];
+    rows = [['Fecha', 'kcal', 'Proteínas (g)', 'Carbohidratos (g)', 'Grasas (g)', 'Frutas y verduras (g)', 'Agua (L)', 'Actividad (min)', 'Calorías actividad (kcal)', 'Meta del día (kcal)', 'Actividad', 'Músculos', 'Medicación tomada', 'Peso (kg)']];
     for (const d of days) {
       rows.push([
         d.date, d.totals.kcal, d.totals.protein, d.totals.carbs, d.totals.fat, d.produceG,
         d.waterMl / 1000,
         d.activity.minutes,
         d.activity.totalKcal,
-        d.activity.kcal,
         d.target.kcal,
-        d.workouts.map((w) => workoutSummary(w, state.profile.weightKg).parts.map(partLabel).join(' + ')).join('; '),
+        d.workouts.map((w) => workoutSummary(w, state.profile).parts.map(partLabel).join(' + ')).join('; '),
         [...new Set(d.workouts.flatMap((w) => w.muscles ?? []))].join(', '),
         medsByMoment(d.meds).map(([label, names]) => `${label}: ${names.join(', ')}`).join('; '),
         d.weight ?? '',

@@ -1,6 +1,7 @@
 // Profile: personal data, goals (several), daily targets, water goal, medication list, data backup.
 import * as db from '../db.js';
-import { state } from '../state.js';
+import { state, APP_VERSION } from '../state.js';
+import { WORKOUT_TYPES, ratesFor } from '../activity.js';
 import { GOALS, BOTTLE_ML, computeTargets, normalizeProfile } from '../goals.js';
 import { esc, icon, dec, parseDec, toast, sortMeds, normalizeMoment, MED_MOMENT_GROUPS } from '../util.js';
 import { getMyFoods } from '../catalog.js';
@@ -56,7 +57,7 @@ export async function renderProfile() {
 
       <section class="targets" aria-labelledby="targets-title">
         <div class="targets-head">
-          <h2 id="targets-title">Meta diaria base</h2>
+          <h2 id="targets-title">Meta diaria</h2>
           <label class="switch">
             <input type="checkbox" name="custom" ${p.custom ? 'checked' : ''}>
             <span>Usar los números de mi nutricionista</span>
@@ -101,6 +102,18 @@ export async function renderProfile() {
       </form>
     </section>
 
+    <section class="settings-block" id="rates" aria-labelledby="rates-title">
+      <h2 id="rates-title">Calorías por hora de cada actividad</h2>
+      <p class="hint">Con estos valores se completan las calorías al cargar una actividad. Poné los tuyos (lo que marca la cinta o el reloj en una hora). Al cargar cada actividad podés corregir el número.</p>
+      <ul class="rates" role="list">
+        ${WORKOUT_TYPES.map((type) => `
+          <li>
+            <label for="rate-${esc(type)}">${esc(type)}</label>
+            <span class="part-num"><input id="rate-${esc(type)}" name="rate" data-type="${esc(type)}" type="number" inputmode="numeric" min="0" max="2000" value="${ratesFor(p)[type]}"><span>kcal/h</span></span>
+          </li>`).join('')}
+      </ul>
+    </section>
+
     <section class="settings-block" aria-labelledby="foods-title">
       <h2 id="foods-title">Mis alimentos</h2>
       <p class="hint">${getMyFoods().length ? `Tenés ${getMyFoods().length} guardados.` : 'Los que escaneás o creás quedan acá.'}</p>
@@ -131,7 +144,8 @@ export async function renderProfile() {
         <button class="chip strong" data-backup="export">Descargar copia</button>
         <label class="chip">Restaurar copia<input type="file" accept="application/json,.json" data-backup="import" hidden></label>
       </div>
-    </section>`}
+    </section>
+    <p class="app-version">NutriFer versión ${APP_VERSION}</p>`}
   `;
 
   bindProfileForm(p, firstRun);
@@ -174,7 +188,7 @@ function bindProfileForm(p, firstRun) {
     targetInputs.forEach((input) => { input.readOnly = !custom; });
     const hint = form.querySelector('.targets-hint');
     if (custom) {
-      hint.textContent = 'Estos números reemplazan el cálculo automático y no cambian con la actividad (el plan de tu nutricionista ya la contempla). El gasto de cada actividad se muestra aparte.';
+      hint.textContent = 'Estos números reemplazan el cálculo automático y no cambian con la actividad. Las calorías de cada actividad se muestran aparte.';
       return;
     }
     const b = readBase();
@@ -188,7 +202,7 @@ function bindProfileForm(p, firstRun) {
     form['t-protein'].value = t.protein;
     form['t-carbs'].value = t.carbs;
     form['t-fat'].value = t.fat;
-    hint.textContent = 'Para un día sin ejercicio (fórmula Mifflin-St Jeor). Cada día se le suma lo que registres en Actividad física. Es orientativo: no reemplaza la indicación de tu nutricionista.';
+    hint.textContent = 'Los días que cargues actividad física se le suman las calorías que registres. Cálculo orientativo (fórmula Mifflin-St Jeor): no reemplaza la indicación de tu nutricionista.';
   };
 
   if (p.custom && p.targets) {
@@ -254,6 +268,18 @@ function bindSettings() {
     await db.put('meds', { id: db.newId(), name, dose: ev.target.dose.value.trim(), moment: ev.target.moment.value, order: meds.length });
     toast(`${name} agregado`);
     renderProfile();
+  });
+
+  main.querySelector('.rates').addEventListener('change', async (ev) => {
+    const input = ev.target.closest('[name="rate"]');
+    if (!input) return;
+    const value = parseInt(input.value, 10);
+    if (!(value >= 0)) return;
+    state.profile = await db.put('profile', {
+      ...state.profile,
+      activityRates: { ...(state.profile.activityRates ?? {}), [input.dataset.type]: value },
+    });
+    toast(`${input.dataset.type}: ${value} kcal por hora`);
   });
 
   main.querySelector('.ai-key')?.addEventListener('submit', async (ev) => {

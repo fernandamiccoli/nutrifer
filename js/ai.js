@@ -237,16 +237,17 @@ export function estimateNutrition(description) {
   return generate(NUTRITION, description);
 }
 
-// Turns a free-text workout note into activities with minutes, intensity and muscle groups.
-// Calories are NOT asked to the model: the app computes them with METs so they stay consistent.
-export function parseWorkout(note, { types, muscles, totalMinutes }) {
+// Turns a free-text workout note into activities with minutes, calories if the note states them,
+// and muscle groups. Calories are never estimated by the model: if the note doesn't say them,
+// the app fills them from the user's own kcal-per-hour references.
+export function parseWorkout(note, { types, muscles }) {
   return generate({
     instructions: `Convertí la descripción de una sesión de actividad física en datos estructurados.
-Usá solo estos tipos de actividad: ${types.join(', ')}. Lo que no encaje va como "Otro".
-Intensidad: "low" (suave), "mid" (moderada) o "high" (intensa); si no se aclara, usá "mid".
+Usá solo estos tipos de actividad: ${types.join(', ')}. La cinta (caminar o trotar en cinta) es "Cinta". Lo que no encaje va como "Otro".
 Grupos musculares (solo si hubo trabajo de fuerza): ${muscles.join(', ')}.
-${totalMinutes ? `La sesión duró ${totalMinutes} minutos en total: repartilos entre las actividades.` : 'Si no se dicen los minutos, estimalos de forma conservadora.'}
-No inventes actividades que no se mencionan. No estimes calorías: solo copiá en deviceKcal un número de calorías que la persona haya escrito.`,
+Si no se dicen los minutos de una actividad, estimalos de forma conservadora.
+En "kcal" copiá solo un número de calorías que la persona haya escrito para esa actividad; si no lo escribió, poné 0. No estimes calorías.
+No inventes actividades que no se mencionan.`,
     schema: {
       type: 'OBJECT',
       properties: {
@@ -257,10 +258,9 @@ No inventes actividades que no se mencionan. No estimes calorías: solo copiá e
             properties: {
               type: { type: 'STRING', enum: types },
               minutes: { type: 'NUMBER' },
-              intensity: { type: 'STRING', enum: ['low', 'mid', 'high'] },
-              deviceKcal: { type: 'NUMBER', description: 'Calorías que la persona dice que marcó la cinta, el reloj o el aparato para esta actividad; 0 si no lo dice' },
+              kcal: { type: 'NUMBER', description: 'Calorías escritas por la persona para esta actividad; 0 si no las escribió' },
             },
-            required: ['type', 'minutes', 'intensity'],
+            required: ['type', 'minutes', 'kcal'],
           },
         },
         muscles: { type: 'ARRAY', items: { type: 'STRING', enum: muscles } },
@@ -271,12 +271,7 @@ No inventes actividades que no se mencionan. No estimes calorías: solo copiá e
     parse: (r) => ({
       parts: (r.parts ?? [])
         .filter((p) => types.includes(p.type) && n(p.minutes) > 0)
-        .map((p) => ({
-          type: p.type,
-          minutes: Math.round(n(p.minutes)),
-          intensity: ['low', 'mid', 'high'].includes(p.intensity) ? p.intensity : 'mid',
-          ...(n(p.deviceKcal) > 0 ? { deviceKcal: Math.round(n(p.deviceKcal)) } : {}),
-        })),
+        .map((p) => ({ type: p.type, minutes: Math.round(n(p.minutes)), kcal: Math.round(n(p.kcal)) })),
       muscles: (r.muscles ?? []).filter((m) => muscles.includes(m)),
       detail: String(r.detail ?? '').slice(0, 80),
     }),

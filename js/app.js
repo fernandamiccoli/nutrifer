@@ -51,7 +51,22 @@ document.addEventListener('wheel', (ev) => {
 }, { passive: true });
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  navigator.serviceWorker.register('sw.js').catch(() => { /* offline support is optional */ });
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js')
+    .then((reg) => {
+      // Look for a new version whenever the app comes back to the foreground.
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    })
+    .catch(() => { /* offline support is optional */ });
+  // A new version took over: reload once so every screen uses it.
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
 }
 
 (async function init() {
