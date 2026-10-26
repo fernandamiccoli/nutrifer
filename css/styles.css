@@ -533,7 +533,7 @@ legend { padding: 0; margin-bottom: 10px; font-weight: 600; }
 .field input:focus, .field textarea:focus { outline: 2px solid var(--brand); outline-offset: 0; border-color: transparent; }
 .field input:read-only { background: var(--sunken); color: var(--ink); }
 
-.field-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.field-grid { display: grid; grid-template-columns: repeat(2, 1fr); align-items: end; gap: 12px; }
 .field-grid.three { grid-template-columns: repeat(3, 1fr); }
 @media (min-width: 560px) { .field-grid.four { grid-template-columns: repeat(4, 1fr); } }
 
