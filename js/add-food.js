@@ -80,7 +80,7 @@ function showSearch() {
       <li><button type="button" class="result" data-a="pick" data-id="${f.id}">
         <span class="result-name">${esc(f.name)}${f.custom ? '<span class="tag">mío</span>' : ''}${f.tags?.includes('gluten') ? '<span class="tag warn">con TACC</span>' : ''}
           ${f.brand ? `<span class="result-sub">${esc(f.brand)}</span>` : ''}</span>
-        <span class="result-meta">${num.format(f.kcal * f.unit.g / 100)} kcal · ${esc(f.unit.label)}</span>
+        <span class="result-meta">${f.missing ? 'sin datos' : `${num.format(f.kcal * f.unit.g / 100)} kcal`} · ${esc(f.unit.label)}</span>
       </button></li>`).join('');
     const emptyMsg = filter === 'mine'
       ? 'Todavía no guardaste alimentos propios. Escaneá un código o creá uno.'
@@ -109,7 +109,7 @@ function showSearch() {
 }
 
 function showPortion(food) {
-  const noGrams = !food.unit.g;
+  const noGrams = !!food.perUnit;
   dialog.innerHTML = `
     <form class="sheet-body">
       <header class="sheet-head">
@@ -123,7 +123,7 @@ function showPortion(food) {
           <input name="amount" type="number" inputmode="decimal" min="0.25" step="any" value="1" required>
         </label>
         <fieldset class="segmented" aria-label="Unidad">
-          <label><input type="radio" name="unit" value="unit" checked><span>${esc(food.unit.label)} (${dec.format(food.unit.g)} g)</span></label>
+          <label><input type="radio" name="unit" value="unit" checked><span>${esc(food.unit.label)}${noGrams ? '' : ` (${dec.format(food.unit.g)} g)`}</span></label>
           ${noGrams ? '' : '<label><input type="radio" name="unit" value="g"><span>gramos</span></label>'}
         </fieldset>
       </div>
@@ -137,15 +137,20 @@ function showPortion(food) {
     const amount = parseFloat(form.amount.value) || 0;
     const byGrams = form.unit.value === 'g';
     const grams = byGrams ? amount : amount * food.unit.g;
+    const units = `${amountFmt.format(amount)} ${amount === 1 ? food.unit.label : plural(food.unit.label)}`;
     return {
       ...nutrientsFor(food, grams),
-      qtyLabel: byGrams
-        ? `${dec.format(grams)} g`
-        : `${amountFmt.format(amount)} ${amount === 1 ? food.unit.label : plural(food.unit.label)} · ${dec.format(grams)} g`,
+      ...(noGrams ? { grams: null } : {}),
+      ...(food.missing ? { macrosMissing: true } : {}),
+      qtyLabel: byGrams ? `${dec.format(grams)} g` : noGrams ? units : `${units} · ${dec.format(grams)} g`,
     };
   };
   const paint = () => {
     const v = calc();
+    if (food.missing) {
+      form.querySelector('.portion-preview').outerHTML = '<p class="notice portion-preview">Este alimento no tiene valores nutricionales cargados. Queda marcado "sin macros" para revisarlo con tu nutricionista.</p>';
+      return;
+    }
     form.querySelector('.portion-preview').innerHTML = `
       <div><dt>Energía</dt><dd>${num.format(v.kcal)} kcal</dd></div>
       <div><dt>Proteínas</dt><dd>${dec.format(v.protein)} g</dd></div>

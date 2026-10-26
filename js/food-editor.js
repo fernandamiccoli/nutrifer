@@ -9,9 +9,10 @@ const MISSING_LABEL = { name: 'nombre', kcal: 'energía', p: 'proteínas', c: 'c
 export function renderFoodEditor(container, { food, draft, missing = [], title, onSaved, onBack, onClose }) {
   const src = food ?? draft ?? {};
   const fromLabel = !!draft; // barcode drafts come per 100 g
-  const mode = food || fromLabel ? 'g100' : 'portion';
-  const unit = src.unit ?? { label: 'porción', g: '' };
-  const factor = mode === 'portion' && unit.g ? unit.g / 100 : 1;
+  // perUnit foods have no known weight: values are stored per portion (unit.g is a virtual 100).
+  const mode = src.perUnit || !(food || fromLabel) ? 'portion' : 'g100';
+  const unit = src.unit ? { ...src.unit, g: src.perUnit ? '' : src.unit.g } : { label: 'unidad', g: '' };
+  const factor = !src.perUnit && mode === 'portion' && unit.g ? unit.g / 100 : 1;
   const show = (v) => (v === null || v === undefined || v === '' ? '' : Math.round(v * factor * 10) / 10);
 
   container.innerHTML = `
@@ -29,8 +30,8 @@ export function renderFoodEditor(container, { food, draft, missing = [], title, 
       <label class="field"><span>Marca <span class="muted">(opcional)</span></span><input name="brand" maxlength="60" value="${esc(src.brand)}"></label>
 
       <div class="field-grid">
-        <label class="field"><span>Porción</span><input name="unitLabel" maxlength="24" value="${esc(unit.label)}" placeholder="feta, unidad, taza"></label>
-        <label class="field"><span>Gramos de la porción</span><input name="unitG" type="number" inputmode="decimal" min="1" step="any" value="${esc(unit.g)}" placeholder="Ej.: 30"></label>
+        <label class="field"><span>Porción</span><input name="unitLabel" maxlength="24" value="${esc(unit.label)}" placeholder="unidad, feta, taza"></label>
+        <label class="field"><span>Gramos <span class="muted">(si los sabés)</span></span><input name="unitG" type="number" inputmode="decimal" min="1" step="any" value="${esc(unit.g)}" placeholder="No sé"></label>
       </div>
 
       <fieldset class="segmented" aria-label="Los valores son">
@@ -39,8 +40,9 @@ export function renderFoodEditor(container, { food, draft, missing = [], title, 
         <label><input type="radio" name="mode" value="g100" ${mode === 'g100' ? 'checked' : ''}><span>cada 100 g</span></label>
       </fieldset>
 
+      <p class="hint">Si no sabés los valores, dejalos vacíos: el alimento queda marcado para revisar con tu nutricionista.</p>
       <div class="field-grid">
-        <label class="field ${missing.includes('kcal') ? 'is-missing' : ''}"><span>Energía (kcal)</span><input name="kcal" type="number" inputmode="decimal" min="0" step="any" required value="${show(src.kcal)}"></label>
+        <label class="field ${missing.includes('kcal') ? 'is-missing' : ''}"><span>Energía (kcal)</span><input name="kcal" type="number" inputmode="decimal" min="0" step="any" value="${src.missing ? '' : show(src.kcal)}" placeholder="No sé"></label>
         <label class="field ${missing.includes('p') ? 'is-missing' : ''}"><span>Proteínas (g)</span><input name="p" type="number" inputmode="decimal" min="0" step="any" value="${show(src.p)}"></label>
         <label class="field ${missing.includes('c') ? 'is-missing' : ''}"><span>Carbohidratos (g)</span><input name="c" type="number" inputmode="decimal" min="0" step="any" value="${show(src.c)}"></label>
         <label class="field ${missing.includes('f') ? 'is-missing' : ''}"><span>Grasas (g)</span><input name="f" type="number" inputmode="decimal" min="0" step="any" value="${show(src.f)}"></label>
@@ -77,18 +79,21 @@ export function renderFoodEditor(container, { food, draft, missing = [], title, 
     const perPortion = form.mode.value === 'portion';
     const kcal = number('kcal');
 
-    if (!name || kcal === null) {
-      error.textContent = 'Completá al menos el nombre y la energía.';
+    if (!name) {
+      error.textContent = 'Poné al menos el nombre.';
       error.hidden = false;
       return;
     }
-    if (perPortion && !unitG) {
-      error.textContent = 'Para cargar valores por porción, indicá cuántos gramos tiene la porción (miralo en la etiqueta o pesalo una vez).';
+    if (!perPortion && !unitG && kcal !== null) {
+      error.textContent = 'Si los valores son cada 100 g, indicá cuántos gramos tiene la porción, o cambiá a "por porción".';
       error.hidden = false;
       return;
     }
 
-    const to100 = (v) => (v === null ? 0 : Math.round((perPortion ? (v / unitG) * 100 : v) * 10) / 10);
+    // Without grams, values stay per portion and unit.g is a virtual 100 so the math still works.
+    const perUnit = perPortion && !unitG;
+    const scale = (v) => (v === null ? 0 : Math.round((perPortion && !perUnit ? (v / unitG) * 100 : v) * 10) / 10);
+    const to100 = scale;
     const tags = [form.kind.value, form.gluten.checked ? 'gluten' : ''].filter(Boolean);
     const saved = await saveMyFood({
       ...(food ?? {}),
@@ -99,7 +104,9 @@ export function renderFoodEditor(container, { food, draft, missing = [], title, 
       p: to100(number('p')),
       c: to100(number('c')),
       f: to100(number('f')),
-      unit: { label: form.unitLabel.value.trim() || 'porción', g: unitG || 100 },
+      unit: { label: form.unitLabel.value.trim() || 'unidad', g: perUnit ? 100 : unitG || 100 },
+      perUnit,
+      missing: kcal === null,
       tags,
     });
     onSaved(saved);

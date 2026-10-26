@@ -149,9 +149,30 @@ export function normalize(s) {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 }
 
+// Words that describe how something was cooked or connect words, not what it is:
+// "huevo a la plancha" should find "Huevo entero".
+const IGNORED = new Set([
+  'a', 'al', 'la', 'el', 'los', 'las', 'de', 'del', 'con', 'sin', 'en', 'y', 'un', 'una', 'poco',
+  'plancha', 'hervido', 'hervida', 'horno', 'vapor', 'salteado', 'salteada', 'frito', 'frita',
+  'crudo', 'cruda', 'asado', 'asada', 'grillado', 'grillada', 'cocido', 'cocida',
+]);
+
+const tokens = (query) => normalize(query).split(/[^a-z0-9ñ]+/).filter((t) => t.length > 1 && !IGNORED.has(t));
+
+// 0 = no match; higher = better. All words found beats some words found.
+export function matchScore(food, query) {
+  const words = tokens(query);
+  if (!words.length) return 1;
+  const name = normalize(`${food.name} ${food.brand ?? ''}`);
+  // Singular/plural tolerant: "huevos" finds "huevo", "frutilla" finds "frutillas".
+  const hit = (w) => name.includes(w) || (w.endsWith('s') && name.includes(w.slice(0, -1)));
+  const found = words.filter(hit).length;
+  if (!found) return 0;
+  return found === words.length ? 100 + (name.startsWith(words[0]) ? 10 : 0) : found;
+}
+
 export function matches(food, query) {
-  const q = normalize(query.trim());
-  return !q || normalize(food.name).includes(q);
+  return matchScore(food, query) > 0;
 }
 
 // Nutrients for an amount in grams of a per-100 g food.

@@ -21,7 +21,7 @@ export function renderMyFoods() {
           <li class="item">
             <div class="item-main">
               <span class="item-name">${esc(f.name)}${f.tags?.includes('gluten') ? '<span class="tag warn">con TACC</span>' : ''}</span>
-              <span class="item-qty">${[f.brand, `${num.format(f.kcal)} kcal cada 100 g`, `${f.unit.label} de ${num.format(f.unit.g)} g`].filter(Boolean).map(esc).join(' · ')}</span>
+              <span class="item-qty">${[f.brand, f.missing ? 'sin datos nutricionales' : f.perUnit ? `${num.format(f.kcal)} kcal por ${f.unit.label}` : `${num.format(f.kcal)} kcal cada 100 g`, f.perUnit ? '' : `${f.unit.label} de ${num.format(f.unit.g)} g`].filter(Boolean).map(esc).join(' · ')}</span>
             </div>
             <button class="icon-btn small" data-f="edit" data-id="${f.id}" aria-label="Editar ${esc(f.name)}">${icon.edit}</button>
             <button class="icon-btn small" data-f="delete" data-id="${f.id}" aria-label="Borrar ${esc(f.name)}">${icon.trash}</button>

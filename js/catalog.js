@@ -1,6 +1,6 @@
 // Unified food catalog: the starter list plus the user's own foods ("mis alimentos").
 import * as db from './db.js';
-import { FOODS, COMBOS, baseFood, matches } from './foods.js';
+import { FOODS, COMBOS, baseFood, matches, matchScore } from './foods.js';
 
 let myFoods = [];
 
@@ -37,8 +37,13 @@ export function search(query, filter = 'all') {
   if (filter === 'mine') foods = myFoods;
   else if (filter === 'veg') foods = FOODS.filter((f) => f.tags.includes('veg'));
   else foods = [...myFoods, ...FOODS];
-  foods = foods.filter((f) => matches(f, query));
-  const combos = filter === 'all' && query.trim() ? COMBOS.filter((c) => matches(c, query)) : [];
+  if (query.trim()) {
+    const scored = foods.map((f) => [f, matchScore(f, query)]).filter(([, s]) => s > 0);
+    // Prefer full matches; partial matches only show when nothing matches every word.
+    const best = Math.max(0, ...scored.map(([, s]) => s));
+    foods = scored.filter(([, s]) => (best >= 100 ? s >= 100 : true)).sort((a, b) => b[1] - a[1]).map(([f]) => f);
+  }
+  const combos = filter === 'all' && query.trim() ? COMBOS.filter((c) => matchScore(c, query) >= 100) : [];
   return { foods: foods.slice(0, query.trim() ? 40 : 60), combos };
 }
 
