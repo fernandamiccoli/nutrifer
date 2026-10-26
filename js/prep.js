@@ -12,8 +12,12 @@ const OIL = [
   { g: 13, label: 'Cucharada (13 g)' },
 ];
 
-export function prepFieldsHtml({ prep = '', itemNote = '', oilG = 0 } = {}) {
+// open: show the fields expanded (editing a logged food); otherwise they fold to keep the sheet short.
+export function prepFieldsHtml({ prep = '', itemNote = '', oilG = 0 } = {}, { open = false } = {}) {
+  const summary = [prep, oilG ? `aceite ${oilG} g` : '', itemNote].filter(Boolean).join(' · ');
   return `
+    <details class="prep-box" ${open || summary ? 'open' : ''}>
+    <summary>Preparación, aceite y nota <span class="muted">${summary ? esc(summary) : '(opcional)'}</span></summary>
     <fieldset class="segmented wrap compact-pills">
       <legend>Preparación <span class="muted">(opcional)</span></legend>
       <label><input type="radio" name="prep" value="" ${prep ? '' : 'checked'}><span>Sin indicar</span></label>
@@ -23,7 +27,8 @@ export function prepFieldsHtml({ prep = '', itemNote = '', oilG = 0 } = {}) {
       <legend>Le puse aceite de oliva</legend>
       ${OIL.map((o) => `<label><input type="radio" name="oil" value="${o.g}" ${o.g === oilG ? 'checked' : ''}><span>${o.label}</span></label>`).join('')}
     </fieldset>
-    <label class="field"><span>Nota del alimento <span class="muted">(opcional)</span></span><input name="itemNote" maxlength="100" value="${esc(itemNote)}" placeholder="Ej.: con un poco de oliva, sin sal"></label>`;
+    <label class="field"><span>Nota del alimento <span class="muted">(opcional)</span></span><input name="itemNote" maxlength="100" value="${esc(itemNote)}" placeholder="Ej.: con un poco de oliva, sin sal"></label>
+    </details>`;
 }
 
 export function readPrep(form) {

@@ -379,7 +379,7 @@ async function editEntry(id) {
         <button type="button" class="icon-btn" data-a="close" aria-label="Cerrar">${icon.close}</button>
       </header>
       <p class="hint">${esc(e.qtyLabel)} · ${e.macrosMissing ? 'sin macros' : `${num.format(e.kcal)} kcal · P ${dec.format(e.protein)} · C ${dec.format(e.carbs)} · G ${dec.format(e.fat)} g`}${e.aiEstimated ? ' · estimado con IA' : ''}</p>
-      ${prepFieldsHtml({ prep: e.prep, itemNote: e.itemNote, oilG: oil?.grams ?? 0 })}
+      ${prepFieldsHtml({ prep: e.prep, itemNote: e.itemNote, oilG: oil?.grams ?? 0 }, { open: true })}
       <button type="button" class="secondary" data-a="ai">${e.macrosMissing ? 'Completar con IA' : 'Recalcular con IA'}</button>
       <p class="ai-out hint" aria-live="polite"></p>
       <button class="primary" type="submit">Guardar</button>
