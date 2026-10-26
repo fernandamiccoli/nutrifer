@@ -7,6 +7,8 @@ import { COMBOS, nutrientsFor, comboTotals } from './foods.js';
 import { renderFoodEditor } from './food-editor.js';
 import { startScan, lookupBarcode } from './barcode.js';
 import { prepFieldsHtml, readPrep, syncOilEntry } from './prep.js';
+import { estimateNutrition, hasKey, AI_MESSAGES } from './ai.js';
+import { saveMyFood } from './catalog.js';
 
 const dialog = document.getElementById('add-dialog');
 let onDone = () => {};
@@ -54,6 +56,7 @@ function showSearch() {
         </label>
         <button type="button" class="icon-btn outlined" data-a="scan" aria-label="Escanear código de barras">${icon.barcode}</button>
       </div>
+      <button type="button" class="ai-entry" data-a="ai">${icon.spark}<span><strong>Describir y calcular con IA</strong><span class="result-sub">Ej.: 1 huevo a la plancha con un poco de oliva</span></span></button>
       <div class="filters" role="group" aria-label="Filtrar">
         ${FILTERS.map(([id, label]) => `<button type="button" class="filter" data-a="filter" data-f="${id}" aria-pressed="${filter === id}">${label}</button>`).join('')}
       </div>
@@ -85,7 +88,10 @@ function showSearch() {
     const emptyMsg = filter === 'mine'
       ? 'Todavía no guardaste alimentos propios. Escaneá un código o creá uno.'
       : 'Sin resultados. Probá con otra palabra, escaneá el código o creá el alimento.';
-    list.innerHTML = comboHtml + foodHtml || `<li class="results-empty">${emptyMsg}</li>`;
+    const aiHint = input.value.trim().length > 2
+      ? `<li><button type="button" class="result ai-suggest" data-a="ai"><span class="result-name">Calcular "${esc(input.value.trim())}" con IA</span>${icon.spark}</button></li>`
+      : '';
+    list.innerHTML = (comboHtml + foodHtml || `<li class="results-empty">${emptyMsg}</li>`) + aiHint;
   };
   input.addEventListener('input', paint);
   dialog.querySelector('.sheet-body').addEventListener('click', (ev) => {
@@ -103,6 +109,7 @@ function showSearch() {
     if (a === 'create') showEditor({ title: 'Crear alimento' });
     if (a === 'quick') showQuick();
     if (a === 'scan') showScanner();
+    if (a === 'ai') showAi(input.value.trim());
   });
   paint();
   if (matchMedia('(pointer: fine)').matches) input.focus();
@@ -281,6 +288,94 @@ function showQuick() {
     }]);
   });
   form.name.focus();
+}
+
+// Free-text description -> Gemini estimate -> review -> log it (optionally save as one of my foods).
+function showAi(prefill = '') {
+  dialog.innerHTML = `
+    <form class="sheet-body">
+      <header class="sheet-head">
+        <button type="button" class="icon-btn" data-a="back" aria-label="Volver a la búsqueda">${icon.prev}</button>
+        <h2 id="add-title">Calcular con IA</h2>
+        <button type="button" class="icon-btn" data-a="close" aria-label="Cerrar">${icon.close}</button>
+      </header>
+      ${hasKey() ? '' : `<p class="notice">${AI_MESSAGES.nokey} <a href="#/perfil#ai" data-a="close">Ir al Perfil</a></p>`}
+      <label class="field">
+        <span>Qué comiste y cuánto</span>
+        <textarea name="desc" rows="3" maxlength="300" placeholder="Ej.: 1 huevo a la plancha con un poco de oliva; 2 fetas de pan sin TACC; un plato de ensalada de lechuga y tomate">${esc(prefill)}</textarea>
+      </label>
+      <button type="button" class="secondary" data-a="estimate" ${hasKey() ? '' : 'disabled'}>Calcular</button>
+      <div class="ai-result" aria-live="polite"></div>
+    </form>`;
+  const form = dialog.querySelector('form');
+  const out = form.querySelector('.ai-result');
+  let estimate = null;
+
+  const run = async () => {
+    const desc = form.desc.value.trim();
+    if (desc.length < 3) return form.desc.focus();
+    const btn = form.querySelector('[data-a="estimate"]');
+    btn.disabled = true;
+    btn.textContent = 'Calculando...';
+    out.innerHTML = '';
+    try {
+      estimate = { ...(await estimateNutrition(desc)), desc };
+      out.innerHTML = `
+        <dl class="portion-preview">
+          <div><dt>Energía</dt><dd>${num.format(estimate.kcal)} kcal</dd></div>
+          <div><dt>Proteínas</dt><dd>${dec.format(estimate.protein)} g</dd></div>
+          <div><dt>Carbohidratos</dt><dd>${dec.format(estimate.carbs)} g</dd></div>
+          <div><dt>Grasas</dt><dd>${dec.format(estimate.fat)} g</dd></div>
+        </dl>
+        <p class="hint"><strong>Estimación de IA, confianza ${esc(estimate.confidence)}.</strong> ${esc(estimate.assumptions)}${estimate.grams ? ` Peso estimado: ${num.format(estimate.grams)} g.` : ''}</p>
+        <label class="switch"><input type="checkbox" name="save"><span>Guardar en mis alimentos para la próxima</span></label>
+        <button class="primary" type="submit">Agregar a ${mealName()}</button>`;
+    } catch (err) {
+      out.innerHTML = `<p class="form-error">${esc(AI_MESSAGES[err.code] ?? AI_MESSAGES.network)}</p>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Calcular de nuevo';
+    }
+  };
+
+  form.addEventListener('click', (ev) => {
+    const a = ev.target.closest('[data-a]')?.dataset.a;
+    if (a === 'back') showSearch();
+    if (a === 'close') dialog.close();
+    if (a === 'estimate') run();
+  });
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (!estimate) return run();
+    const name = estimate.desc.charAt(0).toUpperCase() + estimate.desc.slice(1);
+    let foodId;
+    if (form.save?.checked) {
+      const food = await saveMyFood({
+        name,
+        kcal: estimate.kcal, p: estimate.protein, c: estimate.carbs, f: estimate.fat,
+        unit: { label: 'porción', g: 100 },
+        perUnit: true,
+        tags: [],
+        aiEstimated: true,
+        aiNote: estimate.assumptions,
+      });
+      foodId = food.id;
+    }
+    await saveEntries([{
+      foodId,
+      name,
+      qtyLabel: estimate.grams ? `porción · ${num.format(estimate.grams)} g aprox.` : 'porción',
+      grams: estimate.grams,
+      kcal: estimate.kcal,
+      protein: estimate.protein,
+      carbs: estimate.carbs,
+      fat: estimate.fat,
+      aiEstimated: true,
+      aiNote: `${estimate.assumptions} (confianza ${estimate.confidence})`,
+    }]);
+  });
+  if (prefill && hasKey()) run();
+  else form.desc.focus();
 }
 
 function showScanner() {

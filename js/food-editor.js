@@ -2,6 +2,7 @@
 // they are always stored per 100 g so every food behaves the same in the portion step.
 import { esc, icon } from './util.js';
 import { saveMyFood } from './catalog.js';
+import { estimateNutrition, AI_MESSAGES } from './ai.js';
 
 const MISSING_LABEL = { name: 'nombre', kcal: 'energía', p: 'proteínas', c: 'carbohidratos', f: 'grasas' };
 
@@ -40,7 +41,9 @@ export function renderFoodEditor(container, { food, draft, missing = [], title, 
         <label><input type="radio" name="mode" value="g100" ${mode === 'g100' ? 'checked' : ''}><span>cada 100 g</span></label>
       </fieldset>
 
-      <p class="hint">Si no sabés los valores, dejalos vacíos: el alimento queda marcado para revisar con tu nutricionista.</p>
+      <p class="hint">Si no sabés los valores, calculalos con IA o dejalos vacíos: el alimento queda marcado para revisar con tu nutricionista.</p>
+      <button type="button" class="secondary" data-ed="ai">Calcular con IA</button>
+      <p class="ai-out hint" aria-live="polite"></p>
       <div class="field-grid">
         <label class="field ${missing.includes('kcal') ? 'is-missing' : ''}"><span>Energía (kcal)</span><input name="kcal" type="number" inputmode="decimal" min="0" step="any" value="${src.missing ? '' : show(src.kcal)}" placeholder="No sé"></label>
         <label class="field ${missing.includes('p') ? 'is-missing' : ''}"><span>Proteínas (g)</span><input name="p" type="number" inputmode="decimal" min="0" step="any" value="${show(src.p)}"></label>
@@ -61,10 +64,41 @@ export function renderFoodEditor(container, { food, draft, missing = [], title, 
     </form>`;
 
   const form = container.querySelector('form');
-  form.addEventListener('click', (ev) => {
+  let aiNote = src.aiNote ?? '';
+  let aiEstimated = !!src.aiEstimated;
+  form.addEventListener('click', async (ev) => {
     const b = ev.target.closest('[data-ed]');
     if (b?.dataset.ed === 'back') onBack?.();
     if (b?.dataset.ed === 'close') onClose?.();
+    if (b?.dataset.ed === 'ai') {
+      const name = form.name.value.trim();
+      const outEl = form.querySelector('.ai-out');
+      if (!name) {
+        outEl.textContent = 'Escribí primero el nombre del alimento.';
+        return form.name.focus();
+      }
+      const brand = form.brand.value.trim();
+      const desc = `1 ${form.unitLabel.value.trim() || 'porción'}${form.unitG.value ? ` de ${form.unitG.value} g` : ''} de ${name}${brand ? ` (${brand})` : ''}`;
+      b.disabled = true;
+      b.textContent = 'Calculando...';
+      try {
+        const r = await estimateNutrition(desc);
+        form.querySelector('input[name="mode"][value="portion"]').checked = true;
+        if (!form.unitG.value && r.grams) form.unitG.value = r.grams;
+        form.kcal.value = r.kcal;
+        form.p.value = r.protein;
+        form.c.value = r.carbs;
+        form.f.value = r.fat;
+        aiEstimated = true;
+        aiNote = `${r.assumptions} (confianza ${r.confidence})`;
+        outEl.innerHTML = `<strong>Estimación de IA, confianza ${esc(r.confidence)}.</strong> ${esc(r.assumptions)} Revisá los valores y guardá.`;
+      } catch (err) {
+        outEl.textContent = AI_MESSAGES[err.code] ?? AI_MESSAGES.network;
+      } finally {
+        b.disabled = false;
+        b.textContent = 'Calcular de nuevo con IA';
+      }
+    }
   });
 
   form.addEventListener('submit', async (ev) => {
@@ -107,6 +141,8 @@ export function renderFoodEditor(container, { food, draft, missing = [], title, 
       unit: { label: form.unitLabel.value.trim() || 'unidad', g: perUnit ? 100 : unitG || 100 },
       perUnit,
       missing: kcal === null,
+      aiEstimated,
+      aiNote,
       tags,
     });
     onSaved(saved);

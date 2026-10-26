@@ -155,6 +155,7 @@ export const icon = {
   close: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>',
   trash: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>',
   edit: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 19h4L19 9l-4-4L5 15z"/><path d="m13.5 6.5 4 4"/></svg>',
+  spark: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.5 6.5l2.5 2.5M15 15l2.5 2.5M17.5 6.5 15 9M9 15l-2.5 2.5"/></svg>',
   barcode: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7V5h3M17 5h3v2M20 17v2h-3M7 19H4v-2M8 8v8M11 8v8M14 8v8M17 8v8"/></svg>',
   clock: '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.5 2"/></svg>',
   bottle: '<svg aria-hidden="true" viewBox="0 0 24 32"><path class="bottle-outline" d="M9 2h6v3l2 3v20a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V8l2-3z"/><path class="bottle-fill" d="M7.9 12h8.2v16a1 1 0 0 1-1 1H8.9a1 1 0 0 1-1-1z"/></svg>',

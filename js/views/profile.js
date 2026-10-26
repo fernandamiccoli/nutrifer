@@ -5,6 +5,7 @@ import { ACTIVITY, GOALS, BOTTLE_ML, computeTargets, normalizeProfile } from '..
 import { esc, icon, toast, sortMeds, normalizeMoment, MED_MOMENT_GROUPS } from '../util.js';
 import { getMyFoods } from '../catalog.js';
 import { exportBackup, importBackup } from '../backup.js';
+import { hasKey, saveKey, clearKey, AI_MESSAGES } from '../ai.js';
 
 const main = document.getElementById('main');
 const WATER_BOTTLES = [3, 4, 5, 6];
@@ -15,6 +16,9 @@ export async function renderProfile() {
     sex: 'female', age: '', heightCm: '', weightKg: '', activity: 'light', goals: ['lose'], custom: false,
   });
   const meds = (await db.all('meds')).sort((a, b) => a.order - b.order);
+  const aiConnected = hasKey();
+  let aiModel = '';
+  try { aiModel = localStorage.getItem('nutrifer:geminiModel') || ''; } catch { /* storage blocked */ }
   let lastBackup = 0;
   try { lastBackup = Number(localStorage.getItem('nutrifer:lastBackup')) || 0; } catch { /* storage blocked */ }
 
@@ -110,6 +114,19 @@ export async function renderProfile() {
       <h2 id="foods-title">Mis alimentos</h2>
       <p class="hint">${getMyFoods().length ? `Tenés ${getMyFoods().length} guardados.` : 'Los que escaneás o creás quedan acá.'}</p>
       <a class="chip as-link" href="#/alimentos">${icon.edit}<span>Ver y editar</span></a>
+    </section>
+
+    <section class="settings-block" id="ai" aria-labelledby="ai-title">
+      <h2 id="ai-title">Cálculo con IA (Gemini)</h2>
+      <p class="hint">Gemini estima calorías, proteínas, carbohidratos y grasas a partir de lo que escribís, por ejemplo "1 huevo a la plancha con un poco de oliva". Solo se envía la descripción del alimento. La clave queda guardada en este dispositivo y no viaja en las copias de seguridad.</p>
+      ${aiConnected ? `
+        <p class="ai-status"><span class="badge ok">Conectada</span> <span class="muted">modelo ${esc(aiModel)}</span></p>
+        <div class="meal-actions"><button class="chip" data-ai="remove">Quitar la clave de este dispositivo</button></div>` : `
+        <form class="ai-key">
+          <label class="field"><span>Clave de API de Gemini</span><input name="key" type="password" autocomplete="off" spellcheck="false" placeholder="Pegala acá"></label>
+          <button class="chip strong" type="submit">Conectar</button>
+        </form>
+        <p class="hint">La clave se crea en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>.</p>`}
     </section>
 
     <section class="settings-block" aria-labelledby="data-title">
@@ -242,6 +259,29 @@ function bindSettings() {
     const meds = await db.all('meds');
     await db.put('meds', { id: db.newId(), name, dose: ev.target.dose.value.trim(), moment: ev.target.moment.value, order: meds.length });
     toast(`${name} agregado`);
+    renderProfile();
+  });
+
+  main.querySelector('.ai-key')?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const key = ev.target.key.value.trim();
+    if (!key) return;
+    const btn = ev.target.querySelector('button');
+    btn.disabled = true;
+    btn.textContent = 'Probando la clave...';
+    try {
+      await saveKey(key);
+      toast('Gemini conectado');
+      renderProfile();
+    } catch (err) {
+      toast(AI_MESSAGES[err.code] ?? AI_MESSAGES.network);
+      btn.disabled = false;
+      btn.textContent = 'Conectar';
+    }
+  });
+  main.querySelector('[data-ai="remove"]')?.addEventListener('click', () => {
+    clearKey();
+    toast('Clave quitada de este dispositivo');
     renderProfile();
   });
 

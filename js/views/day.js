@@ -3,13 +3,15 @@ import * as db from '../db.js';
 import { state } from '../state.js';
 import {
   MEALS, mealLabel, momentOf, sortMeds, esc, icon, num, dec, toast, urlFor, releaseUrls, sumMacros,
-  todayKey, parseKey, shiftKey, timeOf,
+  todayKey, parseKey, shiftKey, shortDate, timeOf,
 } from '../util.js';
 import { findFood, isProduce } from '../catalog.js';
 import { PRODUCE_TARGET_G, BOTTLE_ML } from '../goals.js';
 import { openAddFood } from '../add-food.js';
 import { compressPhoto } from '../photos.js';
 import { prepFieldsHtml, readPrep, prepSummary, syncOilEntry } from '../prep.js';
+import { estimateNutrition, AI_MESSAGES } from '../ai.js';
+import { maybeUpdateProfileWeight } from './progress.js';
 
 const main = document.getElementById('main');
 const sheet = document.getElementById('add-dialog');
@@ -27,7 +29,7 @@ const nowTime = () => timeOf(Date.now());
 export async function renderDay() {
   const date = state.currentDate;
   const isToday = date === todayKey();
-  const [entries, photos, notes, water, meds, medlog, workouts] = await Promise.all([
+  const [entries, photos, notes, water, meds, medlog, workouts, weights] = await Promise.all([
     db.byDate('entries', date),
     db.byDate('photos', date),
     db.byDate('notes', date),
@@ -35,6 +37,7 @@ export async function renderDay() {
     db.all('meds'),
     db.byDate('medlog', date),
     db.byDate('workouts', date),
+    db.all('weights'),
   ]);
   releaseUrls();
 
@@ -84,7 +87,10 @@ export async function renderDay() {
       </dl>
     </section>
 
-    ${waterBlock(water?.ml ?? 0, p.waterGoalMl)}
+    <div class="trackers">
+      ${waterBlock(water?.ml ?? 0, p.waterGoalMl)}
+      ${weightBlock(weights, date)}
+    </div>
 
     ${medsCount(meds, medlog)}
 
@@ -159,6 +165,39 @@ async function addWater(delta) {
   const ml = Math.max(0, current + delta);
   await db.put('water', { id: date, date, ml });
   await renderDay();
+}
+
+// ---------- weight ----------
+
+function weightBlock(weights, date) {
+  const today = weights.find((w) => w.date === date);
+  const previous = weights.filter((w) => w.date < date).sort((a, b) => b.date.localeCompare(a.date))[0];
+  const diff = today && previous ? today.kg - previous.kg : null;
+  return `
+    <section class="tracker weight" aria-labelledby="weight-title">
+      <header class="tracker-head">
+        <h2 id="weight-title">Peso del día</h2>
+        ${diff !== null ? `<span class="tracker-value ${diff <= 0 ? 'down' : 'up'}">${diff > 0 ? '+' : ''}${dec.format(diff)} kg</span>` : ''}
+      </header>
+      <form class="weight-day">
+        <label class="field"><span class="visually-hidden">Peso en kg</span>
+          <input name="kg" type="number" inputmode="decimal" min="30" max="300" step="0.1" value="${today ? today.kg : ''}" placeholder="${dec.format(previous?.kg ?? state.profile.weightKg)}">
+        </label>
+        <span class="unit">kg</span>
+        <button class="chip${today ? '' : ' strong'}" type="submit">${today ? 'Actualizar' : 'Guardar'}</button>
+      </form>
+      <p class="tracker-note">${previous ? `Anterior: ${dec.format(previous.kg)} kg (${esc(shortDate(previous.date))})` : 'Pesate en las mismas condiciones, por ejemplo en ayunas.'}</p>
+    </section>`;
+}
+
+async function saveWeight(kgText) {
+  const kg = parseFloat(String(kgText).replace(',', '.'));
+  if (!(kg >= 30 && kg <= 300)) return toast('Escribí un peso entre 30 y 300 kg.');
+  const date = state.currentDate;
+  await db.put('weights', { id: date, date, kg });
+  await maybeUpdateProfileWeight();
+  await renderDay();
+  toast('Peso guardado');
 }
 
 // ---------- medication ----------
@@ -250,7 +289,7 @@ function mealBlock(meal, entries, photos, info, meds = [], medlog = []) {
             <li class="item${e.parentId ? ' item-child' : ''}">
               <button class="item-main" data-action="edit-entry" data-id="${e.id}" aria-label="Editar ${esc(e.name)}">
                 <span class="item-name">${esc(e.name)}</span>
-                <span class="item-qty">${esc(e.qtyLabel)}${prepSummary(e) ? ` · ${esc(prepSummary(e))}` : ''}${e.macrosMissing ? ' · <span class="warn-text">sin macros</span>' : ''}</span>
+                <span class="item-qty">${esc(e.qtyLabel)}${prepSummary(e) ? ` · ${esc(prepSummary(e))}` : ''}${e.macrosMissing ? ' · <span class="warn-text">sin macros</span>' : ''}${e.aiEstimated ? ' · <span class="ai-text">IA</span>' : ''}</span>
               </button>
               <span class="item-kcal">${num.format(e.kcal)}</span>
               <button class="icon-btn small" data-action="delete-entry" data-id="${e.id}" aria-label="Quitar ${esc(e.name)}">${icon.trash}</button>
@@ -338,8 +377,10 @@ async function editEntry(id) {
         <h2 id="add-title">${esc(e.name)}</h2>
         <button type="button" class="icon-btn" data-a="close" aria-label="Cerrar">${icon.close}</button>
       </header>
-      <p class="hint">${esc(e.qtyLabel)} · ${num.format(e.kcal)} kcal</p>
+      <p class="hint">${esc(e.qtyLabel)} · ${e.macrosMissing ? 'sin macros' : `${num.format(e.kcal)} kcal · P ${dec.format(e.protein)} · C ${dec.format(e.carbs)} · G ${dec.format(e.fat)} g`}${e.aiEstimated ? ' · estimado con IA' : ''}</p>
       ${prepFieldsHtml({ prep: e.prep, itemNote: e.itemNote, oilG: oil?.grams ?? 0 })}
+      <button type="button" class="secondary" data-a="ai">${e.macrosMissing ? 'Completar con IA' : 'Recalcular con IA'}</button>
+      <p class="ai-out hint" aria-live="polite"></p>
       <button class="primary" type="submit">Guardar</button>
       <button type="button" class="ghost danger-text" data-a="delete">Quitar este alimento</button>
     </form>`;
@@ -351,11 +392,35 @@ async function editEntry(id) {
       sheet.close();
       await deleteEntry(e.id);
     }
+    if (a === 'ai') {
+      const btn = form.querySelector('[data-a="ai"]');
+      const outEl = form.querySelector('.ai-out');
+      const { oilG, prep, itemNote } = readPrep(form);
+      const desc = [`${e.qtyLabel} de ${e.name}`, prep.toLowerCase(), itemNote, oilG ? 'sin contar el aceite agregado (se registra aparte)' : ''].filter(Boolean).join(', ');
+      btn.disabled = true;
+      btn.textContent = 'Calculando...';
+      try {
+        const r = await estimateNutrition(desc);
+        aiResult = r;
+        outEl.innerHTML = `<strong>${num.format(r.kcal)} kcal · P ${dec.format(r.protein)} · C ${dec.format(r.carbs)} · G ${dec.format(r.fat)} g</strong> (confianza ${esc(r.confidence)}). ${esc(r.assumptions)} Tocá Guardar para usar estos valores.`;
+      } catch (err) {
+        outEl.textContent = AI_MESSAGES[err.code] ?? AI_MESSAGES.network;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Recalcular con IA';
+      }
+    }
   });
+  let aiResult = null;
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const { oilG, ...prep } = readPrep(form);
-    const saved = await db.put('entries', { ...e, ...prep });
+    const values = aiResult ? {
+      kcal: aiResult.kcal, protein: aiResult.protein, carbs: aiResult.carbs, fat: aiResult.fat,
+      grams: e.grams ?? aiResult.grams, macrosMissing: false, aiEstimated: true,
+      aiNote: `${aiResult.assumptions} (confianza ${aiResult.confidence})`,
+    } : {};
+    const saved = await db.put('entries', { ...e, ...prep, ...values });
     await syncOilEntry(saved, oilG);
     sheet.close();
     await renderDay();
@@ -529,6 +594,12 @@ main.addEventListener('click', async (ev) => {
   if (action === 'edit-entry') editEntry(id);
   if (action === 'water') addWater(Number(btn.dataset.ml));
   if (action === 'edit-workout') editWorkout(id);
+});
+
+main.addEventListener('submit', (ev) => {
+  if (!ev.target.matches('.weight-day')) return;
+  ev.preventDefault();
+  saveWeight(ev.target.kg.value);
 });
 
 main.addEventListener('change', async (ev) => {

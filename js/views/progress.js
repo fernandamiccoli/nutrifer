@@ -58,7 +58,7 @@ export async function renderProgress() {
 }
 
 // The most recent weigh-in feeds the automatic targets (not the nutritionist's numbers).
-async function maybeUpdateProfileWeight() {
+export async function maybeUpdateProfileWeight() {
   const latest = (await db.all('weights')).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
   const p = state.profile;
   if (!latest || latest.kg === p.weightKg) return;

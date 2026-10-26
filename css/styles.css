@@ -664,7 +664,40 @@ select {
 
 /* ---------- trackers: water + fasting ---------- */
 
-.tracker.water { margin-top: 12px; }
+.trackers { display: grid; gap: 12px; margin-top: 12px; }
+@media (min-width: 600px) { .trackers { grid-template-columns: 1fr 1fr; } }
+.tracker-value.down { color: var(--produce); }
+.tracker-value.up { color: var(--over); }
+.weight-day { display: flex; align-items: center; gap: 8px; }
+.weight-day .field { flex: 0 1 120px; }
+.weight-day input { text-align: right; font-size: 1.125rem; font-weight: 600; }
+.weight-day .unit { color: var(--ink-2); margin-right: auto; }
+
+.ai-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--brand);
+  border-radius: var(--radius);
+  background: var(--brand-soft);
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.ai-entry svg { color: var(--brand); flex: none; }
+.ai-entry > span { display: flex; flex-direction: column; }
+.ai-entry strong { font-weight: 600; color: var(--brand-strong); }
+.result.ai-suggest { color: var(--brand); font-weight: 500; }
+.result.ai-suggest svg { width: 18px; height: 18px; }
+.ai-text { color: var(--brand); font-weight: 600; }
+.ai-status { display: flex; align-items: center; gap: 8px; }
+.ai-key { display: flex; align-items: flex-end; gap: 8px; }
+.ai-key .field { flex: 1; }
+.ai-key .chip { min-height: 48px; }
+.ai-result { display: flex; flex-direction: column; gap: 12px; }
 
 .tracker {
   display: flex;

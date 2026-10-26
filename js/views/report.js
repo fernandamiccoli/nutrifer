@@ -169,7 +169,7 @@ export function analyzeFoods(days) {
       const food = findFood(e.foodId);
       const row = map.get(key) ?? {
         name: food?.name ?? e.name, times: 0, grams: 0, kcal: 0, protein: 0, carbs: 0, fat: 0,
-        days: new Set(), meals: new Set(), missingMacros: false, gluten: !!food?.tags?.includes('gluten'), unknownGrams: false,
+        days: new Set(), meals: new Set(), missingMacros: false, ai: false, gluten: !!food?.tags?.includes('gluten'), unknownGrams: false,
       };
       row.times += 1;
       row.grams += e.grams ?? 0;
@@ -180,6 +180,7 @@ export function analyzeFoods(days) {
       row.fat += e.fat;
       row.days.add(d.date);
       row.meals.add(e.meal);
+      row.ai ||= !!e.aiEstimated;
       row.missingMacros ||= !!e.macrosMissing || (e.kcal > 0 && !e.protein && !e.carbs && !e.fat);
       map.set(key, row);
     }
@@ -196,14 +197,14 @@ function foodAnalysisHtml(days) {
   return `
     <section class="report-foods">
       <h3>Análisis por alimento</h3>
-      <p class="muted">${rows.length} alimentos distintos, ${num.format(total)} kcal en el período. Ordenados por cuánta energía aportaron.</p>
+      <p class="muted">${rows.length} alimentos distintos, ${num.format(total)} kcal en el período. Ordenados por cuánta energía aportaron.${rows.some((r) => r.ai) ? ' Los marcados <span class="tag">IA</span> son estimaciones de Gemini a partir de la descripción: conviene revisarlos.' : ''}</p>
       <div class="table-scroll">
         <table class="food-table">
           <thead><tr><th scope="col">Alimento</th><th scope="col">Veces</th><th scope="col">Gramos</th><th scope="col">kcal</th><th scope="col">% energía</th><th scope="col">P</th><th scope="col">C</th><th scope="col">G</th></tr></thead>
           <tbody>
             ${rows.map((r) => `
               <tr>
-                <th scope="row">${esc(r.name)}${r.missingMacros ? ' <span class="tag warn">sin macros</span>' : ''}${r.gluten ? ' <span class="tag warn">con TACC</span>' : ''}</th>
+                <th scope="row">${esc(r.name)}${r.missingMacros ? ' <span class="tag warn">sin macros</span>' : ''}${r.gluten ? ' <span class="tag warn">con TACC</span>' : ''}${r.ai ? ' <span class="tag">IA</span>' : ''}</th>
                 <td>${r.times}</td>
                 <td>${r.unknownGrams && !r.grams ? '?' : num.format(r.grams)}</td>
                 <td>${num.format(r.kcal)}</td>
@@ -254,7 +255,7 @@ function dayHtml(d) {
         return `
           <div class="report-meal">
             <h4>${m.label}${info?.time ? ` <span class="muted">${esc(info.time)}</span>` : ''}${items.length ? `<span class="report-kcal">${num.format(sumMacros(items).kcal)} kcal</span>` : ''}</h4>
-            ${items.length ? `<ul>${items.map((e) => `<li><span>${esc(e.name)} <span class="muted">${esc([e.qtyLabel, prepSummary(e)].filter(Boolean).join(' · '))}</span></span><span>${num.format(e.kcal)}</span></li>`).join('')}</ul>` : ''}
+            ${items.length ? `<ul>${items.map((e) => `<li><span>${esc(e.name)} <span class="muted">${esc([e.qtyLabel, prepSummary(e)].filter(Boolean).join(' · '))}</span>${e.aiEstimated ? ' <span class="tag">IA</span>' : ''}</span><span>${num.format(e.kcal)}</span></li>`).join('')}</ul>` : ''}
             ${info?.text ? `<p class="report-note">${esc(info.text)}</p>` : ''}
             ${photos.length ? `<div class="report-photos">${photos.map((p) => `<img src="${urlFor(p.blob)}" alt="Foto de ${m.label.toLowerCase()}">`).join('')}</div>` : ''}
           </div>`;
@@ -276,12 +277,12 @@ async function exportCsv(kind) {
   const { days } = await collect(range.from, range.to);
   let rows;
   if (kind === 'detail') {
-    rows = [['Fecha', 'Comida', 'Hora', 'Alimento', 'Cantidad', 'Gramos', 'Preparación', 'Nota del alimento', 'kcal', 'Proteínas (g)', 'Carbohidratos (g)', 'Grasas (g)', 'Nota de la comida']];
+    rows = [['Fecha', 'Comida', 'Hora', 'Alimento', 'Cantidad', 'Gramos', 'Preparación', 'Nota del alimento', 'kcal', 'Proteínas (g)', 'Carbohidratos (g)', 'Grasas (g)', 'Estimado con IA', 'Nota de la comida']];
     for (const d of days) {
       for (const m of MEALS) {
         const info = d.notes.find((n) => n.meal === m.id);
         d.entries.filter((e) => e.meal === m.id).sort((a, b) => a.createdAt - b.createdAt).forEach((e) => {
-          rows.push([d.date, m.label, info?.time ?? '', e.name, e.qtyLabel, e.grams ?? '', e.prep ?? '', e.itemNote ?? '', e.kcal, e.protein, e.carbs, e.fat, info?.text ?? '']);
+          rows.push([d.date, m.label, info?.time ?? '', e.name, e.qtyLabel, e.grams ?? '', e.prep ?? '', e.itemNote ?? '', e.kcal, e.protein, e.carbs, e.fat, e.aiEstimated ? `sí: ${e.aiNote ?? ''}` : '', info?.text ?? '']);
         });
       }
     }
