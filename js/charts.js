@@ -4,18 +4,22 @@ import { esc, num, dec } from './util.js';
 
 // Vertical columns, one per day, with an optional target line.
 // data: [{ label, value, tip }]; value null = no record that day.
+// Per-day targets (data[i].target) draw a tick on each column instead of one line.
 export function columns({ data, target, targetLabel, kind, unit }) {
-  const max = Math.max(target || 0, ...data.map((d) => d.value || 0)) * 1.08 || 1;
+  const perDay = data.some((d) => d.target != null);
+  const max = Math.max(target || 0, ...data.map((d) => Math.max(d.value || 0, d.target || 0))) * 1.08 || 1;
   const every = data.length > 14 ? Math.ceil(data.length / 10) : 1;
   return `
     <div class="cols cols-${kind}" style="--n:${data.length}" role="img" aria-label="${esc(data.map((d) => `${d.label}: ${d.value == null ? 'sin registro' : `${num.format(d.value)} ${unit}`}`).join('; '))}">
       ${target ? `<span class="cols-target" style="--t:${target / max}"><span>${esc(targetLabel)}</span></span>` : ''}
       ${data.map((d, i) => `
         <div class="col" title="${esc(d.tip ?? `${d.label}: ${d.value == null ? 'sin registro' : `${num.format(d.value)} ${unit}`}`)}">
-          <span class="col-bar${d.value == null ? ' is-empty' : ''}${target && d.value > target ? ' is-over' : ''}" style="--h:${((d.value || 0) / max) * 100}%"></span>
+          <span class="col-bar${d.value == null ? ' is-empty' : ''}${(d.target ?? target) && d.value > (d.target ?? target) ? ' is-over' : ''}" style="--h:${((d.value || 0) / max) * 100}%"></span>
+          ${perDay && d.target ? `<span class="col-target" style="--t:${d.target / max}"></span>` : ''}
           <span class="col-label">${i % every === 0 || i === data.length - 1 ? esc(d.label) : ''}</span>
         </div>`).join('')}
-    </div>`;
+    </div>
+    ${perDay ? '<p class="legend"><span><i class="key tick"></i>Meta del día (sube los días con actividad)</span></p>' : ''}`;
 }
 
 // Horizontal bars with the value at the tip. rows: [{ label, value, valueLabel, color? }]

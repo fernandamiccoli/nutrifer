@@ -147,22 +147,22 @@ async function errorDetail(res) {
   }
 }
 
-function requestBody(description, model) {
+function requestBody(task, text, model) {
   return {
-    systemInstruction: { parts: [{ text: INSTRUCTIONS }] },
-    contents: [{ role: 'user', parts: [{ text: description }] }],
+    systemInstruction: { parts: [{ text: task.instructions }] },
+    contents: [{ role: 'user', parts: [{ text }] }],
     generationConfig: {
       temperature: 0.2,
       responseMimeType: 'application/json',
-      responseSchema: SCHEMA,
+      responseSchema: task.schema,
       thinkingConfig: thinkingConfig(model),
     },
   };
 }
 
 // One model: a retry without the thinking setting if rejected, and one retry if overloaded.
-async function callModel(model, key, description) {
-  const body = requestBody(description, model);
+async function callModel(model, key, task, text) {
+  const body = requestBody(task, text, model);
   let res = await post(model, key, body);
   if (res.status === 400 && /think/i.test(await errorDetail(res.clone()))) {
     delete body.generationConfig.thinkingConfig;
@@ -175,25 +175,13 @@ async function callModel(model, key, description) {
   return res;
 }
 
-function parseEstimate(data, model) {
-  const text = data.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? '').join('') ?? '';
-  const r = JSON.parse(text);
-  const n = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
-  return {
-    grams: n(r.grams) || null,
-    kcal: Math.round(n(r.kcal)),
-    protein: Math.round(n(r.protein) * 10) / 10,
-    carbs: Math.round(n(r.carbs) * 10) / 10,
-    fat: Math.round(n(r.fat) * 10) / 10,
-    assumptions: String(r.assumptions ?? '').slice(0, 300),
-    confidence: ['alta', 'media', 'baja'].includes(r.confidence) ? r.confidence : 'baja',
-    model,
-  };
-}
+const responseJson = (data) => JSON.parse(
+  data.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? '').join('') ?? '',
+);
 
-// description: what was eaten, e.g. "1 huevo a la plancha con un poco de oliva".
-// Tries the last model that worked first; if a model is overloaded, slow or retired, moves to the next one.
-export async function estimateNutrition(description) {
+// Runs a structured task. Tries the last model that worked first; if a model is overloaded,
+// slow or retired, moves to the next one.
+async function generate(task, text) {
   const key = getKey();
   if (!key) throw new AiError('nokey');
   const models = (await candidateModels(key)).slice(0, MAX_MODELS);
@@ -202,16 +190,16 @@ export async function estimateNutrition(description) {
   for (const model of models) {
     let res;
     try {
-      res = await callModel(model, key, description);
+      res = await callModel(model, key, task, text);
     } catch (err) {
       if (err.code === 'timeout') { lastError = err; continue; }
       throw err;
     }
     if (res.ok) {
       try {
-        const estimate = parseEstimate(await res.json(), model);
+        const out = { ...task.parse(responseJson(await res.json())), model };
         rememberModel(model);
-        return estimate;
+        return out;
       } catch {
         throw new AiError('parse');
       }
@@ -226,6 +214,67 @@ export async function estimateNutrition(description) {
     throw new AiError('network', detail);
   }
   throw lastError;
+}
+
+const n = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
+
+const NUTRITION = {
+  instructions: INSTRUCTIONS,
+  schema: SCHEMA,
+  parse: (r) => ({
+    grams: n(r.grams) || null,
+    kcal: Math.round(n(r.kcal)),
+    protein: Math.round(n(r.protein) * 10) / 10,
+    carbs: Math.round(n(r.carbs) * 10) / 10,
+    fat: Math.round(n(r.fat) * 10) / 10,
+    assumptions: String(r.assumptions ?? '').slice(0, 300),
+    confidence: ['alta', 'media', 'baja'].includes(r.confidence) ? r.confidence : 'baja',
+  }),
+};
+
+// description: what was eaten, e.g. "1 huevo a la plancha con un poco de oliva".
+export function estimateNutrition(description) {
+  return generate(NUTRITION, description);
+}
+
+// Turns a free-text workout note into activities with minutes, intensity and muscle groups.
+// Calories are NOT asked to the model: the app computes them with METs so they stay consistent.
+export function parseWorkout(note, { types, muscles, totalMinutes }) {
+  return generate({
+    instructions: `Convertí la descripción de una sesión de actividad física en datos estructurados.
+Usá solo estos tipos de actividad: ${types.join(', ')}. Lo que no encaje va como "Otro".
+Intensidad: "low" (suave), "mid" (moderada) o "high" (intensa); si no se aclara, usá "mid".
+Grupos musculares (solo si hubo trabajo de fuerza): ${muscles.join(', ')}.
+${totalMinutes ? `La sesión duró ${totalMinutes} minutos en total: repartilos entre las actividades.` : 'Si no se dicen los minutos, estimalos de forma conservadora.'}
+No inventes actividades que no se mencionan.`,
+    schema: {
+      type: 'OBJECT',
+      properties: {
+        parts: {
+          type: 'ARRAY',
+          items: {
+            type: 'OBJECT',
+            properties: {
+              type: { type: 'STRING', enum: types },
+              minutes: { type: 'NUMBER' },
+              intensity: { type: 'STRING', enum: ['low', 'mid', 'high'] },
+            },
+            required: ['type', 'minutes', 'intensity'],
+          },
+        },
+        muscles: { type: 'ARRAY', items: { type: 'STRING', enum: muscles } },
+        detail: { type: 'STRING', description: 'Resumen breve en español rioplatense, por ejemplo "piernas y glúteos + cinta"' },
+      },
+      required: ['parts', 'muscles', 'detail'],
+    },
+    parse: (r) => ({
+      parts: (r.parts ?? [])
+        .filter((p) => types.includes(p.type) && n(p.minutes) > 0)
+        .map((p) => ({ type: p.type, minutes: Math.round(n(p.minutes)), intensity: ['low', 'mid', 'high'].includes(p.intensity) ? p.intensity : 'mid' })),
+      muscles: (r.muscles ?? []).filter((m) => muscles.includes(m)),
+      detail: String(r.detail ?? '').slice(0, 80),
+    }),
+  }, note);
 }
 
 // Small end-to-end check for the profile screen: how long it takes and what fails.

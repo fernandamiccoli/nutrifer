@@ -6,11 +6,12 @@ import {
   todayKey, parseKey, shiftKey, shortDate, timeOf,
 } from '../util.js';
 import { findFood, isProduce } from '../catalog.js';
-import { PRODUCE_TARGET_G, BOTTLE_ML } from '../goals.js';
+import { PRODUCE_TARGET_G, BOTTLE_ML, targetsForDay } from '../goals.js';
+import { WORKOUT_TYPES, INTENSITY, MUSCLES, workoutParts, workoutSummary, dayActivity, partLabel } from '../activity.js';
 import { openAddFood } from '../add-food.js';
 import { compressPhoto } from '../photos.js';
 import { prepFieldsHtml, readPrep, prepSummary, syncOilEntry } from '../prep.js';
-import { estimateNutrition, AI_MESSAGES } from '../ai.js';
+import { estimateNutrition, parseWorkout, AI_MESSAGES } from '../ai.js';
 import { maybeUpdateProfileWeight } from './progress.js';
 
 const main = document.getElementById('main');
@@ -18,8 +19,6 @@ const sheet = document.getElementById('add-dialog');
 const photoDialog = document.getElementById('photo-dialog');
 const photoInput = document.getElementById('photo-input');
 
-export const WORKOUT_TYPES = ['Musculación', 'Caminata', 'Cardio', 'Pádel', 'Biodanza', 'Pilates o yoga', 'Otro'];
-export const INTENSITY = { low: 'Suave', mid: 'Moderada', high: 'Intensa' };
 
 let lastRenderedDate = null;
 let pendingPhotoMeal = null;
@@ -48,7 +47,8 @@ export async function renderDay() {
   const dayMonth = d.toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
 
   const p = state.profile;
-  const t = p.targets;
+  const activity = dayActivity(workouts, p.weightKg);
+  const t = targetsForDay(p, activity.kcal);
   const totals = sumMacros(entries);
   const left = t.kcal - totals.kcal;
   const produceG = entries.reduce((s, e) => s + (isProduce(findFood(e.foodId)) ? e.grams ?? 0 : 0), 0);
@@ -79,6 +79,7 @@ export async function renderDay() {
             ? `Te quedan <strong>${num.format(left)} kcal</strong>.`
             : `Pasaste la meta por <strong>${num.format(-left)} kcal</strong>.`
       }</p>
+      ${activity.kcal ? `<p class="budget-activity">Actividad: ${num.format(activity.minutes)} min, ~${num.format(activity.kcal)} kcal${p.custom ? ' (tu meta es la de tu nutricionista, no cambia)' : ` · ya sumadas a la meta (base ${num.format(p.targets.kcal)})`}.</p>` : ''}
       <dl class="macros">
         ${macroRow('Proteínas', totals.protein, t.protein, 'g', 'protein')}
         ${macroRow('Carbohidratos', totals.carbs, t.carbs, 'g', 'carbs')}
@@ -106,7 +107,7 @@ export async function renderDay() {
       ${unscheduledMedsBlock(meds, medlog)}
     </div>
 
-    ${workoutsBlock(workouts.sort((a, b) => a.createdAt - b.createdAt))}
+    ${workoutsBlock(workouts.sort((a, b) => a.createdAt - b.createdAt), p.weightKg)}
   `;
 }
 
@@ -482,58 +483,125 @@ photoDialog.addEventListener('click', async (ev) => {
 
 // ---------- activity ----------
 
-function workoutsBlock(workouts) {
+function workoutsBlock(workouts, kg) {
+  const total = dayActivity(workouts, kg);
   return `
     <section class="activity" aria-labelledby="activity-title">
       <header class="meal-head">
         <h2 id="activity-title">Actividad física</h2>
-        ${workouts.length ? `<span class="meal-kcal">${num.format(workouts.reduce((s, w) => s + (w.minutes || 0), 0))} min</span>` : ''}
+        ${workouts.length ? `<span class="meal-kcal">${num.format(total.minutes)} min · ${num.format(total.kcal)} kcal</span>` : ''}
       </header>
       ${workouts.length ? `
         <ul class="items" role="list">
-          ${workouts.map((w) => `
+          ${workouts.map((w) => {
+            const s = workoutSummary(w, kg);
+            return `
             <li class="item">
-              <div class="item-main">
-                <span class="item-name">${esc(w.type)}${w.detail ? `: ${esc(w.detail)}` : ''}</span>
-                <span class="item-qty">${w.minutes ? `${num.format(w.minutes)} min` : ''}${w.intensity ? ` · ${INTENSITY[w.intensity]}` : ''}${w.time ? ` · ${esc(w.time)}` : ''}${w.note ? ` · ${esc(w.note)}` : ''}</span>
-              </div>
-              <button class="icon-btn small" data-action="edit-workout" data-id="${w.id}" aria-label="Editar ${esc(w.type)}">${icon.edit}</button>
-            </li>`).join('')}
-        </ul>` : '<p class="tracker-note">¿Fuiste al gimnasio o hiciste otra actividad? Registrala acá.</p>'}
+              <button class="item-main" data-action="edit-workout" data-id="${w.id}" aria-label="Editar actividad">
+                <span class="item-name">${esc(s.parts.map((x) => x.type).join(' + '))}${w.detail ? `: ${esc(w.detail)}` : ''}</span>
+                <span class="item-qty">${esc(s.parts.map(partLabel).join(' · '))}${w.time ? ` · ${esc(w.time)}` : ''}</span>
+                ${s.muscles.length ? `<span class="item-qty">Músculos: ${esc(s.muscles.join(', '))}</span>` : ''}
+                ${w.note ? `<span class="item-qty">${esc(w.note)}</span>` : ''}
+              </button>
+              <span class="item-kcal">${num.format(s.kcal)}</span>
+              <span></span>
+            </li>`;
+          }).join('')}
+        </ul>
+        <p class="tracker-note">Gasto estimado por METs con tu peso (${dec.format(kg)} kg), solo lo que suma el ejercicio sobre el reposo.</p>` : '<p class="tracker-note">¿Fuiste al gimnasio o hiciste otra actividad? Registrala acá: suma a tu meta del día.</p>'}
       <div class="meal-actions">
         <button class="chip" data-action="edit-workout">${icon.plus}<span>Actividad</span></button>
       </div>
     </section>`;
 }
 
+function partRowHtml(type, part) {
+  const on = !!part;
+  return `
+    <li class="part-row${on ? '' : ' is-off'}" data-type="${esc(type)}">
+      <label class="part-check"><input type="checkbox" name="part-on" value="${esc(type)}" ${on ? 'checked' : ''}><span>${esc(type)}</span></label>
+      <span class="part-fields" ${on ? '' : 'hidden'}>
+        <label class="part-min"><span class="visually-hidden">Minutos de ${esc(type)}</span><input name="part-min" type="number" inputmode="numeric" min="1" max="600" value="${part?.minutes ?? ''}" placeholder="min"><span aria-hidden="true">min</span></label>
+        <select name="part-int" aria-label="Intensidad de ${esc(type)}">
+          ${Object.entries(INTENSITY).map(([k, label]) => `<option value="${k}" ${(part?.intensity ?? 'mid') === k ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>
+      </span>
+    </li>`;
+}
+
 async function editWorkout(id) {
   const w = id ? await db.get('workouts', id) : null;
-  // Several activities can share one session (e.g. musculación + caminata). `type` keeps the joined label.
-  const types = w?.types ?? (w?.type ? [w.type] : ['Musculación']);
+  const kg = state.profile.weightKg;
+  const parts = w ? workoutParts(w) : [];
+  const partOf = (type) => parts.find((x) => x.type === type);
   sheet.innerHTML = `
     <form class="sheet-body">
       <header class="sheet-head">
         <h2 id="add-title">${w ? 'Editar actividad' : 'Agregar actividad'}</h2>
         <button type="button" class="icon-btn" data-a="close" aria-label="Cerrar">${icon.close}</button>
       </header>
-      <fieldset class="segmented wrap">
-        <legend>Qué hiciste <span class="muted">(podés elegir varias)</span></legend>
-        ${WORKOUT_TYPES.map((tp) => `<label><input type="checkbox" name="types" value="${tp}" ${types.includes(tp) ? 'checked' : ''}><span>${tp}</span></label>`).join('')}
+      <label class="field"><span>Contá qué hiciste <span class="muted">(opcional, la IA lo puede ordenar)</span></span>
+        <textarea name="note" rows="3" maxlength="300" placeholder="Ej.: 75 min de pesas de piernas y glúteos, después 45 min de cinta caminando rápido">${esc(w?.note ?? '')}</textarea>
+      </label>
+      <button type="button" class="secondary" data-a="ai">Completar desde la nota con IA</button>
+      <p class="ai-out hint" aria-live="polite"></p>
+
+      <fieldset class="parts">
+        <legend>Actividades, minutos e intensidad</legend>
+        <ul class="part-list" role="list">${WORKOUT_TYPES.map((tp) => partRowHtml(tp, partOf(tp))).join('')}</ul>
       </fieldset>
-      <label class="field"><span>Detalle <span class="muted">(opcional)</span></span><input name="detail" maxlength="80" value="${esc(w?.detail ?? '')}" placeholder="Ej.: piernas y glúteos + 30 min de caminata"></label>
+
+      <fieldset class="segmented wrap compact-pills muscles" ${partOf('Musculación') ? '' : 'hidden'}>
+        <legend>Músculos trabajados</legend>
+        ${MUSCLES.map((m) => `<label><input type="checkbox" name="muscles" value="${m}" ${w?.muscles?.includes(m) ? 'checked' : ''}><span>${m}</span></label>`).join('')}
+      </fieldset>
+
       <div class="field-grid">
-        <label class="field"><span>Minutos</span><input name="minutes" type="number" inputmode="numeric" min="1" max="600" value="${esc(w?.minutes ?? '')}" required></label>
+        <label class="field"><span>Detalle <span class="muted">(opcional)</span></span><input name="detail" maxlength="80" value="${esc(w?.detail ?? '')}" placeholder="Ej.: piernas + cinta"></label>
         <label class="field"><span>Hora</span><input name="time" type="time" value="${esc(w?.time ?? (state.currentDate === todayKey() ? nowTime() : ''))}"></label>
       </div>
-      <fieldset class="segmented">
-        <legend>Intensidad</legend>
-        ${Object.entries(INTENSITY).map(([k, label]) => `<label><input type="radio" name="intensity" value="${k}" ${(w?.intensity ?? 'mid') === k ? 'checked' : ''}><span>${label}</span></label>`).join('')}
-      </fieldset>
-      <label class="field"><span>Nota <span class="muted">(opcional)</span></span><input name="note" maxlength="120" value="${esc(w?.note ?? '')}" placeholder="Ej.: con profe, me dolió la rodilla"></label>
+      <p class="workout-total"></p>
       <button class="primary" type="submit">${w ? 'Guardar cambios' : 'Agregar actividad'}</button>
       ${w ? '<button type="button" class="ghost danger-text" data-a="delete">Borrar actividad</button>' : ''}
     </form>`;
   const form = sheet.querySelector('form');
+
+  const readParts = () => [...form.querySelectorAll('.part-row')]
+    .filter((row) => row.querySelector('[name="part-on"]').checked)
+    .map((row) => ({
+      type: row.dataset.type,
+      minutes: parseInt(row.querySelector('[name="part-min"]').value, 10) || 0,
+      intensity: row.querySelector('[name="part-int"]').value,
+    }));
+
+  const paint = () => {
+    form.querySelectorAll('.part-row').forEach((row) => {
+      const on = row.querySelector('[name="part-on"]').checked;
+      row.classList.toggle('is-off', !on);
+      row.querySelector('.part-fields').hidden = !on;
+    });
+    form.querySelector('.muscles').hidden = !readParts().some((x) => x.type === 'Musculación');
+    const s = workoutSummary({ parts: readParts() }, kg);
+    form.querySelector('.workout-total').innerHTML = s.minutes
+      ? `<strong>${num.format(s.minutes)} min · ${num.format(s.kcal)} kcal</strong> <span class="muted">estimadas</span>`
+      : '<span class="muted">Marcá al menos una actividad con sus minutos.</span>';
+  };
+
+  const applyParsed = (r) => {
+    form.querySelectorAll('.part-row').forEach((row) => {
+      const part = r.parts.find((x) => x.type === row.dataset.type);
+      row.querySelector('[name="part-on"]').checked = !!part;
+      if (part) {
+        row.querySelector('[name="part-min"]').value = part.minutes;
+        row.querySelector('[name="part-int"]').value = part.intensity;
+      }
+    });
+    form.querySelectorAll('[name="muscles"]').forEach((c) => { c.checked = r.muscles.includes(c.value); });
+    if (r.detail && !form.detail.value) form.detail.value = r.detail;
+    paint();
+  };
+
+  form.addEventListener('input', paint);
   form.addEventListener('click', async (ev) => {
     const a = ev.target.closest('[data-a]')?.dataset.a;
     if (a === 'close') sheet.close();
@@ -543,29 +611,58 @@ async function editWorkout(id) {
       await renderDay();
       toast('Actividad borrada');
     }
+    if (a === 'ai') {
+      const note = form.note.value.trim();
+      const out = form.querySelector('.ai-out');
+      if (note.length < 5) {
+        out.textContent = 'Escribí primero en la nota qué hiciste.';
+        return form.note.focus();
+      }
+      const btn = ev.target.closest('[data-a]');
+      btn.disabled = true;
+      btn.textContent = 'Leyendo la nota...';
+      try {
+        const totalMinutes = readParts().reduce((s, x) => s + x.minutes, 0) || null;
+        const r = await parseWorkout(note, { types: WORKOUT_TYPES, muscles: MUSCLES, totalMinutes });
+        if (!r.parts.length) throw Object.assign(new Error('empty'), { code: 'parse' });
+        applyParsed(r);
+        out.textContent = 'Listo: revisá los minutos y la intensidad antes de guardar.';
+      } catch (err) {
+        out.textContent = AI_MESSAGES[err.code] ?? AI_MESSAGES.network;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Completar desde la nota con IA';
+      }
+    }
   });
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    const minutes = parseInt(form.minutes.value, 10);
-    const chosen = [...form.querySelectorAll('input[name="types"]:checked')].map((i) => i.value);
-    if (!chosen.length) return toast('Elegí al menos una actividad.');
-    if (!(minutes > 0)) return form.reportValidity();
+    const chosen = readParts();
+    if (!chosen.length || chosen.some((x) => !(x.minutes > 0))) return toast('Marcá cada actividad con sus minutos.');
+    const muscles = chosen.some((x) => x.type === 'Musculación')
+      ? [...form.querySelectorAll('[name="muscles"]:checked')].map((c) => c.value)
+      : [];
+    const s = workoutSummary({ parts: chosen }, kg);
     await db.put('workouts', {
       id: w?.id ?? db.newId(),
       date: state.currentDate,
       createdAt: w?.createdAt ?? Date.now(),
-      types: chosen,
-      type: chosen.join(' + '),
+      parts: chosen,
+      muscles,
+      // flat fields kept for the CSV and older readers
+      types: chosen.map((x) => x.type),
+      type: chosen.map((x) => x.type).join(' + '),
+      minutes: s.minutes,
+      kcal: s.kcal,
       detail: form.detail.value.trim(),
-      minutes,
       time: form.time.value,
-      intensity: form.intensity.value,
       note: form.note.value.trim(),
     });
     sheet.close();
     await renderDay();
-    toast(w ? 'Actividad actualizada' : 'Actividad registrada');
+    toast(`${w ? 'Actividad actualizada' : 'Actividad registrada'}: ${num.format(s.kcal)} kcal`);
   });
+  paint();
   sheet.showModal();
 }
 

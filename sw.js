@@ -1,11 +1,11 @@
 // Network-first for the app's own files (updates show up right away), cache fallback offline.
 // Third-party requests (fonts, Open Food Facts, scanner library) pass through untouched.
 
-const CACHE = 'nutrifer-v11';
+const CACHE = 'nutrifer-v12';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/styles.css',
   'js/app.js', 'js/db.js', 'js/util.js', 'js/state.js', 'js/goals.js', 'js/foods.js', 'js/catalog.js',
-  'js/photos.js', 'js/prep.js', 'js/ai.js', 'js/charts.js', 'js/barcode.js', 'js/backup.js', 'js/food-editor.js', 'js/add-food.js',
+  'js/photos.js', 'js/prep.js', 'js/ai.js', 'js/charts.js', 'js/activity.js', 'js/barcode.js', 'js/backup.js', 'js/food-editor.js', 'js/add-food.js',
   'js/views/day.js', 'js/views/profile.js', 'js/views/progress.js', 'js/views/report.js', 'js/views/myfoods.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png',
 ];

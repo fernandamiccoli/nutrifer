@@ -1,7 +1,7 @@
 // Router and startup.
 import * as db from './db.js';
 import { state } from './state.js';
-import { normalizeProfile } from './goals.js';
+import { normalizeProfile, computeTargets } from './goals.js';
 import { loadMyFoods } from './catalog.js';
 import { releaseUrls } from './util.js';
 import { renderDay } from './views/day.js';
@@ -57,6 +57,12 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 (async function init() {
   const stored = await db.get('profile', 'me');
   state.profile = normalizeProfile(stored);
+  // Profiles from before daily-activity targets used a general activity level: move to the base target.
+  if (state.profile?.activity) {
+    const { activity, ...rest } = state.profile;
+    if (!rest.custom) rest.targets = computeTargets(rest);
+    state.profile = await db.put('profile', rest);
+  }
   await loadMyFoods();
   route();
 })();

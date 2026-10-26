@@ -1,7 +1,7 @@
 // Profile: personal data, goals (several), daily targets, water goal, medication list, data backup.
 import * as db from '../db.js';
 import { state } from '../state.js';
-import { ACTIVITY, GOALS, BOTTLE_ML, computeTargets, normalizeProfile } from '../goals.js';
+import { GOALS, BOTTLE_ML, computeTargets, normalizeProfile } from '../goals.js';
 import { esc, icon, dec, parseDec, toast, sortMeds, normalizeMoment, MED_MOMENT_GROUPS } from '../util.js';
 import { getMyFoods } from '../catalog.js';
 import { exportBackup, importBackup } from '../backup.js';
@@ -13,7 +13,7 @@ const WATER_BOTTLES = [3, 4, 5, 6];
 export async function renderProfile() {
   const firstRun = !state.profile;
   const p = state.profile ?? normalizeProfile({
-    sex: 'female', age: '', heightCm: '', weightKg: '', activity: 'light', goals: ['lose'], custom: false,
+    sex: 'female', age: '', heightCm: '', weightKg: '', goals: ['lose'], custom: false,
   });
   const meds = (await db.all('meds')).sort((a, b) => a.order - b.order);
   const aiConnected = hasKey();
@@ -48,15 +48,6 @@ export async function renderProfile() {
         <label class="field"><span>Peso (kg)</span><input name="weightKg" type="text" inputmode="decimal" autocomplete="off" pattern="[0-9]{2,3}([.,][0-9])?" value="${p.weightKg ? esc(dec.format(p.weightKg)) : ''}" required></label>
       </div>
 
-      <fieldset class="options">
-        <legend>Actividad física</legend>
-        ${Object.entries(ACTIVITY).map(([key, a]) => `
-          <label class="option">
-            <input type="radio" name="activity" value="${key}" ${p.activity === key ? 'checked' : ''}>
-            <span class="option-text"><strong>${a.label}</strong><span>${a.hint}</span></span>
-          </label>`).join('')}
-      </fieldset>
-
       <fieldset class="segmented wrap">
         <legend>Objetivos <span class="muted">(podés elegir varios)</span></legend>
         ${Object.entries(GOALS).map(([key, g]) => `
@@ -65,7 +56,7 @@ export async function renderProfile() {
 
       <section class="targets" aria-labelledby="targets-title">
         <div class="targets-head">
-          <h2 id="targets-title">Meta diaria</h2>
+          <h2 id="targets-title">Meta diaria base</h2>
           <label class="switch">
             <input type="checkbox" name="custom" ${p.custom ? 'checked' : ''}>
             <span>Usar los números de mi nutricionista</span>
@@ -168,7 +159,6 @@ function bindProfileForm(p, firstRun) {
     age: parseInt(form.age.value, 10),
     heightCm: parseFloat(form.heightCm.value),
     weightKg: parseDec(form.weightKg.value),
-    activity: form.activity.value,
     goals: [...form.querySelectorAll('input[name="goals"]:checked')].map((i) => i.value),
     waterGoalMl: Number(form.water.value) || 2000,
   });
@@ -184,7 +174,7 @@ function bindProfileForm(p, firstRun) {
     targetInputs.forEach((input) => { input.readOnly = !custom; });
     const hint = form.querySelector('.targets-hint');
     if (custom) {
-      hint.textContent = 'Estos números reemplazan el cálculo automático.';
+      hint.textContent = 'Estos números reemplazan el cálculo automático y no cambian con la actividad (el plan de tu nutricionista ya la contempla). El gasto de cada actividad se muestra aparte.';
       return;
     }
     const b = readBase();
@@ -198,7 +188,7 @@ function bindProfileForm(p, firstRun) {
     form['t-protein'].value = t.protein;
     form['t-carbs'].value = t.carbs;
     form['t-fat'].value = t.fat;
-    hint.textContent = 'Cálculo orientativo (fórmula Mifflin-St Jeor). No reemplaza la indicación de tu nutricionista.';
+    hint.textContent = 'Para un día sin ejercicio (fórmula Mifflin-St Jeor). Cada día se le suma lo que registres en Actividad física. Es orientativo: no reemplaza la indicación de tu nutricionista.';
   };
 
   if (p.custom && p.targets) {

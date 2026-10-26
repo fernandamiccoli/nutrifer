@@ -1,8 +1,10 @@
-// Progress: weight log with chart.
+// Progress: weight log with chart, and the last two weeks of physical activity.
 import * as db from '../db.js';
 import { state } from '../state.js';
 import { computeTargets } from '../goals.js';
-import { esc, icon, dec, parseDec, toast, todayKey, shortDate, longDate } from '../util.js';
+import { esc, icon, num, dec, parseDec, toast, todayKey, shiftKey, keysBetween, shortDate, longDate } from '../util.js';
+import { dayActivity, workoutSummary } from '../activity.js';
+import { columns, hbars } from '../charts.js';
 
 const main = document.getElementById('main');
 
@@ -11,6 +13,8 @@ export async function renderProgress() {
   const latest = weights.at(-1);
   const first = weights[0];
   const change = latest && first && latest !== first ? latest.kg - first.kg : null;
+  const from = shiftKey(todayKey(), -13);
+  const workouts = await db.byDateRange('workouts', from, todayKey());
 
   main.innerHTML = `
     <header class="page-head">
@@ -38,6 +42,8 @@ export async function renderProgress() {
             </li>`).join('')}
         </ul>` : ''}
     </section>
+
+    ${activityHtml(workouts, from)}
   `;
 
   main.querySelector('.weight-form').addEventListener('submit', async (ev) => {
@@ -90,4 +96,26 @@ function weightChart(weights) {
         ${weights.map((w) => `<circle class="dot" cx="${x(w.date)}" cy="${y(w.kg)}" r="3.5"><title>${shortDate(w.date)}: ${dec.format(w.kg)} kg</title></circle>`).join('')}
       </svg>
     </figure>`;
+}
+
+function activityHtml(workouts, from) {
+  const kg = state.profile.weightKg;
+  const days = keysBetween(from, todayKey()).map((date) => ({ date, ...dayActivity(workouts.filter((w) => w.date === date), kg) }));
+  const total = days.reduce((a, d) => ({ minutes: a.minutes + d.minutes, kcal: a.kcal + d.kcal, sessions: a.sessions + d.sessions }), { minutes: 0, kcal: 0, sessions: 0 });
+  const muscles = {};
+  for (const w of workouts) for (const m of workoutSummary(w, kg).muscles) muscles[m] = (muscles[m] ?? 0) + 1;
+  return `
+    <section class="settings-block" aria-labelledby="act-title">
+      <div class="block-head">
+        <h2 id="act-title">Actividad, últimas 2 semanas</h2>
+        ${total.sessions ? `<p class="figure-sm">${num.format(total.minutes)} min <span>${total.sessions} ${total.sessions === 1 ? 'sesión' : 'sesiones'} · ~${num.format(total.kcal)} kcal</span></p>` : ''}
+      </div>
+      ${total.sessions ? `
+        ${columns({
+          data: days.map((d) => ({ label: shortDate(d.date).replace('.', ''), value: d.minutes || null, tip: `${shortDate(d.date)}: ${d.minutes ? `${num.format(d.minutes)} min, ~${num.format(d.kcal)} kcal` : 'sin actividad'}` })),
+          kind: 'activity', unit: 'min',
+        })}
+        ${Object.keys(muscles).length ? `<h3 class="sub-title">Músculos trabajados (sesiones)</h3>${hbars(Object.entries(muscles).sort((a, b) => b[1] - a[1]).map(([m, n]) => ({ label: m, value: n, valueLabel: String(n) })), { valueWidth: '2em' })}` : ''}`
+        : '<p class="hint">Todavía no registraste actividad. Se carga desde la pantalla del día.</p>'}
+    </section>`;
 }

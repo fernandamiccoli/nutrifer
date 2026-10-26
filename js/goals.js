@@ -1,12 +1,8 @@
-// Orientative targets: Mifflin-St Jeor BMR x activity factor, adjusted by goals.
-// The nutritionist's numbers always win; the profile lets the user override them.
+// Orientative targets: Mifflin-St Jeor BMR x 1.2 (a day of ordinary life, no exercise),
+// plus the exercise actually logged that day, all adjusted by the weight goal.
+// The nutritionist's numbers always win: when the profile uses them they stay fixed.
 
-export const ACTIVITY = {
-  sedentary: { label: 'Poca actividad', hint: 'Trabajo sentada, casi sin ejercicio', factor: 1.2 },
-  light: { label: 'Liviana', hint: 'Caminatas o ejercicio 1 a 3 veces por semana', factor: 1.375 },
-  moderate: { label: 'Moderada', hint: 'Ejercicio 3 a 5 veces por semana', factor: 1.55 },
-  high: { label: 'Alta', hint: 'Ejercicio intenso casi todos los días', factor: 1.725 },
-};
+const DAILY_LIFE_FACTOR = 1.2;
 
 // Several goals can be active at once. Only the weight ones change the numbers.
 export const GOALS = {
@@ -32,14 +28,21 @@ function weightStrategy(goals) {
   return { kcalFactor: 1, proteinPerKg: 1.4 };
 }
 
-export function computeTargets({ sex, age, heightCm, weightKg, activity, goals }) {
+// exerciseKcal: energy of the activity logged that day (0 = rest day, the base target).
+export function computeTargets({ sex, age, heightCm, weightKg, goals }, exerciseKcal = 0) {
   const { kcalFactor, proteinPerKg } = weightStrategy(goals);
-  const base = 10 * weightKg + 6.25 * heightCm - 5 * age + (sex === 'male' ? 5 : -161);
-  const kcal = Math.round((base * ACTIVITY[activity].factor * kcalFactor) / 10) * 10;
+  const bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + (sex === 'male' ? 5 : -161);
+  const kcal = Math.round(((bmr * DAILY_LIFE_FACTOR + exerciseKcal) * kcalFactor) / 10) * 10;
   const protein = Math.round(weightKg * proteinPerKg);
   const fat = Math.round((kcal * FAT_SHARE) / 9);
   const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
   return { kcal, protein, carbs, fat };
+}
+
+// The target for one day: the nutritionist's fixed numbers, or the base plus that day's exercise.
+export function targetsForDay(profile, exerciseKcal = 0) {
+  if (profile.custom || !exerciseKcal) return profile.targets;
+  return computeTargets(profile, exerciseKcal);
 }
 
 // Profiles saved before multi-goal support stored a single `goal`.
