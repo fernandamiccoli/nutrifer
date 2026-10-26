@@ -246,7 +246,7 @@ Usá solo estos tipos de actividad: ${types.join(', ')}. Lo que no encaje va com
 Intensidad: "low" (suave), "mid" (moderada) o "high" (intensa); si no se aclara, usá "mid".
 Grupos musculares (solo si hubo trabajo de fuerza): ${muscles.join(', ')}.
 ${totalMinutes ? `La sesión duró ${totalMinutes} minutos en total: repartilos entre las actividades.` : 'Si no se dicen los minutos, estimalos de forma conservadora.'}
-No inventes actividades que no se mencionan.`,
+No inventes actividades que no se mencionan. No estimes calorías: solo copiá en deviceKcal un número de calorías que la persona haya escrito.`,
     schema: {
       type: 'OBJECT',
       properties: {
@@ -258,6 +258,7 @@ No inventes actividades que no se mencionan.`,
               type: { type: 'STRING', enum: types },
               minutes: { type: 'NUMBER' },
               intensity: { type: 'STRING', enum: ['low', 'mid', 'high'] },
+              deviceKcal: { type: 'NUMBER', description: 'Calorías que la persona dice que marcó la cinta, el reloj o el aparato para esta actividad; 0 si no lo dice' },
             },
             required: ['type', 'minutes', 'intensity'],
           },
@@ -270,7 +271,12 @@ No inventes actividades que no se mencionan.`,
     parse: (r) => ({
       parts: (r.parts ?? [])
         .filter((p) => types.includes(p.type) && n(p.minutes) > 0)
-        .map((p) => ({ type: p.type, minutes: Math.round(n(p.minutes)), intensity: ['low', 'mid', 'high'].includes(p.intensity) ? p.intensity : 'mid' })),
+        .map((p) => ({
+          type: p.type,
+          minutes: Math.round(n(p.minutes)),
+          intensity: ['low', 'mid', 'high'].includes(p.intensity) ? p.intensity : 'mid',
+          ...(n(p.deviceKcal) > 0 ? { deviceKcal: Math.round(n(p.deviceKcal)) } : {}),
+        })),
       muscles: (r.muscles ?? []).filter((m) => muscles.includes(m)),
       detail: String(r.detail ?? '').slice(0, 80),
     }),

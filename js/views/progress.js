@@ -101,18 +101,18 @@ function weightChart(weights) {
 function activityHtml(workouts, from) {
   const kg = state.profile.weightKg;
   const days = keysBetween(from, todayKey()).map((date) => ({ date, ...dayActivity(workouts.filter((w) => w.date === date), kg) }));
-  const total = days.reduce((a, d) => ({ minutes: a.minutes + d.minutes, kcal: a.kcal + d.kcal, sessions: a.sessions + d.sessions }), { minutes: 0, kcal: 0, sessions: 0 });
+  const total = days.reduce((a, d) => ({ minutes: a.minutes + d.minutes, totalKcal: a.totalKcal + d.totalKcal, sessions: a.sessions + d.sessions }), { minutes: 0, totalKcal: 0, sessions: 0 });
   const muscles = {};
   for (const w of workouts) for (const m of workoutSummary(w, kg).muscles) muscles[m] = (muscles[m] ?? 0) + 1;
   return `
     <section class="settings-block" aria-labelledby="act-title">
       <div class="block-head">
         <h2 id="act-title">Actividad, últimas 2 semanas</h2>
-        ${total.sessions ? `<p class="figure-sm">${num.format(total.minutes)} min <span>${total.sessions} ${total.sessions === 1 ? 'sesión' : 'sesiones'} · ~${num.format(total.kcal)} kcal</span></p>` : ''}
+        ${total.sessions ? `<p class="figure-sm">${num.format(total.minutes)} min <span>${total.sessions} ${total.sessions === 1 ? 'sesión' : 'sesiones'} · ~${num.format(total.totalKcal)} kcal en total</span></p>` : ''}
       </div>
       ${total.sessions ? `
         ${columns({
-          data: days.map((d) => ({ label: shortDate(d.date).replace('.', ''), value: d.minutes || null, tip: `${shortDate(d.date)}: ${d.minutes ? `${num.format(d.minutes)} min, ~${num.format(d.kcal)} kcal` : 'sin actividad'}` })),
+          data: days.map((d) => ({ label: shortDate(d.date).replace('.', ''), value: d.minutes || null, tip: `${shortDate(d.date)}: ${d.minutes ? `${num.format(d.minutes)} min, ~${num.format(d.totalKcal)} kcal` : 'sin actividad'}` })),
           kind: 'activity', unit: 'min',
         })}
         ${Object.keys(muscles).length ? `<h3 class="sub-title">Músculos trabajados (sesiones)</h3>${hbars(Object.entries(muscles).sort((a, b) => b[1] - a[1]).map(([m, n]) => ({ label: m, value: n, valueLabel: String(n) })), { valueWidth: '2em' })}` : ''}`

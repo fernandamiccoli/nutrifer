@@ -812,6 +812,19 @@ select {
   font-variant-numeric: tabular-nums;
 }
 .part-fields select { width: auto; min-height: 38px; font-size: 0.875rem; }
+.part-fields { flex-wrap: wrap; }
+.part-kcal { display: flex; align-items: center; gap: 4px; color: var(--ink-2); font-size: 0.8125rem; }
+.part-kcal input {
+  width: 70px;
+  min-height: 38px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.part-hint { flex-basis: 100%; margin: 0 0 8px 30px; color: var(--ink-2); font-size: 0.8125rem; }
 .workout-total { font-size: 0.9375rem; }
 .activity .tracker-note { margin-top: 8px; }
 

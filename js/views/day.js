@@ -7,7 +7,7 @@ import {
 } from '../util.js';
 import { findFood, isProduce } from '../catalog.js';
 import { PRODUCE_TARGET_G, BOTTLE_ML, targetsForDay } from '../goals.js';
-import { WORKOUT_TYPES, INTENSITY, MUSCLES, workoutParts, workoutSummary, dayActivity, partLabel } from '../activity.js';
+import { WORKOUT_TYPES, INTENSITY, INTENSITY_HINTS, MUSCLES, workoutParts, workoutSummary, dayActivity, partLabel } from '../activity.js';
 import { openAddFood } from '../add-food.js';
 import { compressPhoto } from '../photos.js';
 import { prepFieldsHtml, readPrep, prepSummary, syncOilEntry } from '../prep.js';
@@ -79,7 +79,7 @@ export async function renderDay() {
             ? `Te quedan <strong>${num.format(left)} kcal</strong>.`
             : `Pasaste la meta por <strong>${num.format(-left)} kcal</strong>.`
       }</p>
-      ${activity.kcal ? `<p class="budget-activity">Actividad: ${num.format(activity.minutes)} min, ~${num.format(activity.kcal)} kcal${p.custom ? ' (tu meta es la de tu nutricionista, no cambia)' : ` · ya sumadas a la meta (base ${num.format(p.targets.kcal)})`}.</p>` : ''}
+      ${activity.minutes ? `<p class="budget-activity">Actividad: ${num.format(activity.minutes)} min, ~${num.format(activity.totalKcal)} kcal en total. ${p.custom ? 'Tu meta es la de tu nutricionista y no cambia.' : `${num.format(activity.kcal)} kcal extra sobre el reposo ya están sumadas a la meta (base ${num.format(p.targets.kcal)}).`}</p>` : ''}
       <dl class="macros">
         ${macroRow('Proteínas', totals.protein, t.protein, 'g', 'protein')}
         ${macroRow('Carbohidratos', totals.carbs, t.carbs, 'g', 'carbs')}
@@ -489,7 +489,7 @@ function workoutsBlock(workouts, kg) {
     <section class="activity" aria-labelledby="activity-title">
       <header class="meal-head">
         <h2 id="activity-title">Actividad física</h2>
-        ${workouts.length ? `<span class="meal-kcal">${num.format(total.minutes)} min · ${num.format(total.kcal)} kcal</span>` : ''}
+        ${workouts.length ? `<span class="meal-kcal">${num.format(total.minutes)} min · ~${num.format(total.totalKcal)} kcal</span>` : ''}
       </header>
       ${workouts.length ? `
         <ul class="items" role="list">
@@ -503,12 +503,12 @@ function workoutsBlock(workouts, kg) {
                 ${s.muscles.length ? `<span class="item-qty">Músculos: ${esc(s.muscles.join(', '))}</span>` : ''}
                 ${w.note ? `<span class="item-qty">${esc(w.note)}</span>` : ''}
               </button>
-              <span class="item-kcal">${num.format(s.kcal)}</span>
+              <span class="item-kcal">${num.format(s.totalKcal)}</span>
               <span></span>
             </li>`;
           }).join('')}
         </ul>
-        <p class="tracker-note">Gasto estimado por METs con tu peso (${dec.format(kg)} kg), solo lo que suma el ejercicio sobre el reposo.</p>` : '<p class="tracker-note">¿Fuiste al gimnasio o hiciste otra actividad? Registrala acá: suma a tu meta del día.</p>'}
+        <p class="tracker-note">Gasto total estimado con tu peso (${dec.format(kg)} kg), comparable con lo que marca una cinta o un reloj. De eso, ${num.format(total.kcal)} kcal son extra sobre el reposo: esa parte se suma a tu meta del día.</p>` : '<p class="tracker-note">¿Fuiste al gimnasio o hiciste otra actividad? Registrala acá: suma a tu meta del día.</p>'}
       <div class="meal-actions">
         <button class="chip" data-action="edit-workout">${icon.plus}<span>Actividad</span></button>
       </div>
@@ -525,7 +525,9 @@ function partRowHtml(type, part) {
         <select name="part-int" aria-label="Intensidad de ${esc(type)}">
           ${Object.entries(INTENSITY).map(([k, label]) => `<option value="${k}" ${(part?.intensity ?? 'mid') === k ? 'selected' : ''}>${label}</option>`).join('')}
         </select>
+        <label class="part-kcal"><span class="visually-hidden">Calorías que marcó el aparato para ${esc(type)}</span><input name="part-kcal" type="number" inputmode="numeric" min="1" max="3000" value="${part?.deviceKcal ?? ''}" placeholder="kcal"><span aria-hidden="true">del aparato</span></label>
       </span>
+      ${INTENSITY_HINTS[type] ? `<p class="part-hint" ${on ? '' : 'hidden'}>${esc(INTENSITY_HINTS[type])}</p>` : ''}
     </li>`;
 }
 
@@ -572,6 +574,7 @@ async function editWorkout(id) {
       type: row.dataset.type,
       minutes: parseInt(row.querySelector('[name="part-min"]').value, 10) || 0,
       intensity: row.querySelector('[name="part-int"]').value,
+      ...(parseInt(row.querySelector('[name="part-kcal"]').value, 10) > 0 ? { deviceKcal: parseInt(row.querySelector('[name="part-kcal"]').value, 10) } : {}),
     }));
 
   const paint = () => {
@@ -579,11 +582,13 @@ async function editWorkout(id) {
       const on = row.querySelector('[name="part-on"]').checked;
       row.classList.toggle('is-off', !on);
       row.querySelector('.part-fields').hidden = !on;
+      const hint = row.querySelector('.part-hint');
+      if (hint) hint.hidden = !on;
     });
     form.querySelector('.muscles').hidden = !readParts().some((x) => x.type === 'Musculación');
     const s = workoutSummary({ parts: readParts() }, kg);
     form.querySelector('.workout-total').innerHTML = s.minutes
-      ? `<strong>${num.format(s.minutes)} min · ${num.format(s.kcal)} kcal</strong> <span class="muted">estimadas</span>`
+      ? `<strong>${num.format(s.minutes)} min · ~${num.format(s.totalKcal)} kcal en total</strong><br><span class="muted">${num.format(s.kcal)} kcal extra sobre el reposo se suman a tu meta del día.${s.fromDevice ? ' Incluye lo que marcó el aparato.' : ' Si la cinta o el reloj te dio un número, cargalo en "del aparato".'}</span>`
       : '<span class="muted">Marcá al menos una actividad con sus minutos.</span>';
   };
 
@@ -594,6 +599,7 @@ async function editWorkout(id) {
       if (part) {
         row.querySelector('[name="part-min"]').value = part.minutes;
         row.querySelector('[name="part-int"]').value = part.intensity;
+        row.querySelector('[name="part-kcal"]').value = part.deviceKcal ?? '';
       }
     });
     form.querySelectorAll('[name="muscles"]').forEach((c) => { c.checked = r.muscles.includes(c.value); });
@@ -654,13 +660,14 @@ async function editWorkout(id) {
       type: chosen.map((x) => x.type).join(' + '),
       minutes: s.minutes,
       kcal: s.kcal,
+      totalKcal: s.totalKcal,
       detail: form.detail.value.trim(),
       time: form.time.value,
       note: form.note.value.trim(),
     });
     sheet.close();
     await renderDay();
-    toast(`${w ? 'Actividad actualizada' : 'Actividad registrada'}: ${num.format(s.kcal)} kcal`);
+    toast(`${w ? 'Actividad actualizada' : 'Actividad registrada'}: ~${num.format(s.totalKcal)} kcal`);
   });
   paint();
   sheet.showModal();
