@@ -3,7 +3,7 @@ import * as db from './db.js';
 import { state } from './state.js';
 import { normalizeProfile, computeTargets } from './goals.js';
 import { loadMyFoods } from './catalog.js';
-import { releaseUrls } from './util.js';
+import { releaseUrls, toast } from './util.js';
 import { renderDay } from './views/day.js';
 import { renderProfile } from './views/profile.js';
 import { renderProgress } from './views/progress.js';
@@ -41,6 +41,11 @@ function route() {
 window.addEventListener('hashchange', () => {
   route();
   window.scrollTo(0, 0);
+});
+
+// Never fail silently: an unexpected error shows up as a message the user can report.
+window.addEventListener('unhandledrejection', (ev) => {
+  toast(`Algo falló: ${ev.reason?.message ?? ev.reason}`);
 });
 
 // A focused number input silently changes value on mouse wheel; release focus instead.

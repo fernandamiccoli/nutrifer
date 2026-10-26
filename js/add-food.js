@@ -155,7 +155,13 @@ function showPortion(food) {
   const paint = () => {
     const v = calc();
     if (food.missing) {
-      form.querySelector('.portion-preview').outerHTML = '<p class="notice portion-preview">Este alimento no tiene valores nutricionales cargados. Queda marcado "sin macros" para revisarlo con tu nutricionista.</p>';
+      form.querySelector('.portion-preview').outerHTML = `
+        <div class="notice portion-preview">
+          <p>Este alimento no tiene calorías ni macros cargados.</p>
+          ${hasKey()
+            ? '<button type="button" class="chip strong" data-a="ai-complete">Calcular con IA</button><p class="ai-status hint" aria-live="polite"></p>'
+            : '<p>Si lo agregás así, queda marcado "sin macros". Conectá Gemini en el Perfil para calcularlo.</p>'}
+        </div>`;
       return;
     }
     form.querySelector('.portion-preview').innerHTML = `
@@ -168,17 +174,43 @@ function showPortion(food) {
     if (ev.target.name === 'unit') form.amount.value = ev.target.value === 'g' ? food.unit.g : 1;
     paint();
   });
-  form.addEventListener('click', (ev) => {
+  form.addEventListener('click', async (ev) => {
     const a = ev.target.closest('[data-a]')?.dataset.a;
     if (a === 'back') showSearch();
     if (a === 'close') dialog.close();
+    if (a === 'ai-complete') {
+      // Fill the saved food itself, so it has its values from now on.
+      const btn = ev.target.closest('[data-a]');
+      const progress = aiProgress(btn, form.querySelector('.ai-status'));
+      try {
+        const r = await estimateNutrition(`1 ${food.unit.label} de ${food.name}${food.brand ? ` (${food.brand})` : ''}`, progress.options);
+        progress.done();
+        const updated = await saveMyFood({
+          ...food,
+          kcal: r.kcal, p: r.protein, c: r.carbs, f: r.fat,
+          perUnit: true,
+          unit: { label: food.unit.label, g: 100 },
+          missing: false,
+          aiEstimated: true,
+          aiNote: `${r.assumptions} (confianza ${r.confidence})`,
+        });
+        toast(`${food.name}: ${num.format(r.kcal)} kcal por ${food.unit.label}`);
+        showPortion(updated);
+      } catch (err) {
+        progress.done(aiErrorHtml(err));
+      }
+    }
   });
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const v = calc();
-    if (v.grams <= 0) return;
+    // Foods saved without grams have grams = null: check the amount typed, not the grams.
+    if (!(parseFloat(form.amount.value) > 0)) {
+      toast('Poné una cantidad mayor a cero.');
+      return form.amount.focus();
+    }
     const { oilG, ...prep } = readPrep(form);
-    await saveEntries([{ foodId: food.id, name: food.name, ...v, ...prep }], null, oilG);
+    await saveEntries([{ foodId: food.id, name: food.name, ...v, ...prep, ...(food.aiEstimated ? { aiEstimated: true, aiNote: food.aiNote } : {}) }], null, oilG);
   });
   paint();
   if (matchMedia('(pointer: fine)').matches) form.amount.select();
@@ -437,9 +469,14 @@ async function handleCode(code, status) {
 async function saveEntries(items, comboName, oilG = 0) {
   const meal = dialog.dataset.meal;
   const now = Date.now();
-  for (const [i, item] of items.entries()) {
-    const saved = await db.put('entries', { id: db.newId(), date: state.currentDate, meal, createdAt: now + i, ...item });
-    if (oilG) await syncOilEntry(saved, oilG);
+  try {
+    for (const [i, item] of items.entries()) {
+      const saved = await db.put('entries', { id: db.newId(), date: state.currentDate, meal, createdAt: now + i, ...item });
+      if (oilG) await syncOilEntry(saved, oilG);
+    }
+  } catch (err) {
+    toast(`No se pudo guardar: ${err?.message ?? err}`);
+    return;
   }
   dialog.close();
   await onDone();
