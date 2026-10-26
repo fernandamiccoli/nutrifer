@@ -16,30 +16,53 @@ export function clearKey() {
   try {
     localStorage.removeItem(KEY_STORAGE);
     localStorage.removeItem(MODEL_STORAGE);
+    localStorage.removeItem(MODELS_STORAGE);
   } catch { /* storage blocked */ }
 }
 
-// Picks the newest general "flash" model the key can use, so model renames don't break the app.
-async function pickModel(key) {
+const MODELS_STORAGE = 'nutrifer:geminiModels';
+
+// Flash models the key can use, newest first, then the lighter "flash-lite" ones as a last resort.
+// Listing them (instead of hardcoding names) keeps the app working when Google renames models.
+async function listModels(key) {
   let res;
   try {
     res = await fetch(`${API}/models?pageSize=200`, { headers: { 'x-goog-api-key': key } });
   } catch {
     throw new AiError('network');
   }
-  if (!res.ok) throw new AiError(res.status === 400 || res.status === 403 ? 'key' : 'network');
+  if (!res.ok) throw new AiError(res.status === 400 || res.status === 403 ? 'key' : 'network', await errorDetail(res));
   const { models = [] } = await res.json();
-  const usable = models
+  const names = models
     .filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
-    .map((m) => m.name.replace(/^models\//, ''))
-    .filter((n) => /^gemini-[\d.]+-flash$/.test(n) || /^gemini-[\d.]+-flash-latest$/.test(n) || n === 'gemini-flash-latest');
-  if (!usable.length) throw new AiError('model');
+    .map((m) => m.name.replace(/^models\//, ''));
   const version = (n) => parseFloat(n.match(/gemini-([\d.]+)/)?.[1] ?? '0');
-  return usable.sort((a, b) => version(b) - version(a))[0];
+  const byVersion = (a, b) => version(b) - version(a);
+  const flash = names.filter((n) => /^gemini-[\d.]+-flash(-latest)?$/.test(n)).sort(byVersion);
+  const lite = names.filter((n) => /^gemini-[\d.]+-flash-lite(-latest)?$/.test(n)).sort(byVersion);
+  const ordered = [...flash, ...(names.includes('gemini-flash-latest') ? ['gemini-flash-latest'] : []), ...lite];
+  if (!ordered.length) throw new AiError('model');
+  try { localStorage.setItem(MODELS_STORAGE, JSON.stringify(ordered)); } catch { /* storage blocked */ }
+  return ordered;
+}
+
+async function candidateModels(key) {
+  let preferred = '';
+  let list = [];
+  try {
+    preferred = localStorage.getItem(MODEL_STORAGE) || '';
+    list = JSON.parse(localStorage.getItem(MODELS_STORAGE) || '[]');
+  } catch { /* storage blocked */ }
+  if (!list.length) list = await listModels(key);
+  return [...new Set([preferred, ...list].filter(Boolean))];
+}
+
+function rememberModel(model) {
+  try { localStorage.setItem(MODEL_STORAGE, model); } catch { /* storage blocked */ }
 }
 
 export async function saveKey(key) {
-  const model = await pickModel(key.trim());
+  const [model] = await listModels(key.trim());
   try {
     localStorage.setItem(KEY_STORAGE, key.trim());
     localStorage.setItem(MODEL_STORAGE, model);
@@ -63,7 +86,8 @@ export const AI_MESSAGES = {
   model: 'Tu clave no tiene acceso a un modelo de Gemini compatible.',
   parse: 'Gemini respondió algo que no pude leer. Probá de nuevo.',
   storage: 'Este navegador no deja guardar la clave.',
-  timeout: 'Gemini tardó más de 30 segundos. Probá de nuevo; si se repite, usá Probar conexión en el Perfil.',
+  timeout: 'Gemini tardó demasiado en responder. Probá de nuevo en un rato.',
+  busy: 'Los modelos de Gemini están saturados en este momento. Probá de nuevo en unos minutos.',
 };
 
 const SCHEMA = {
@@ -86,7 +110,8 @@ Incluí lo que se agregó al preparar (por ejemplo aceite, manteca, azúcar) si 
 Si la cantidad no está clara, suponé una porción casera típica de Argentina y decilo en "assumptions".
 Si es un producto envasado, usá los valores típicos del producto. No inventes precisión: redondeá kcal a enteros y macros a un decimal.`;
 
-const TIMEOUT_MS = 30000;
+const TIMEOUT_MS = 20000;
+const MAX_MODELS = 3;
 
 // Thinking adds latency and isn't needed for a lookup-style estimate.
 // Gemini 2.x takes thinkingBudget; 3.x and later take thinkingLevel.
@@ -122,15 +147,8 @@ async function errorDetail(res) {
   }
 }
 
-// description: what was eaten, e.g. "1 huevo a la plancha con un poco de oliva".
-export async function estimateNutrition(description) {
-  const key = getKey();
-  if (!key) throw new AiError('nokey');
-  let model;
-  try { model = localStorage.getItem(MODEL_STORAGE); } catch { /* storage blocked */ }
-  model ||= await pickModel(key);
-
-  const body = {
+function requestBody(description, model) {
+  return {
     systemInstruction: { parts: [{ text: INSTRUCTIONS }] },
     contents: [{ role: 'user', parts: [{ text: description }] }],
     generationConfig: {
@@ -140,41 +158,74 @@ export async function estimateNutrition(description) {
       thinkingConfig: thinkingConfig(model),
     },
   };
-  let res = await post(model, key, body);
-  if (res.status === 400) {
-    // Some models reject the thinking setting: retry once without it.
-    const detail = await errorDetail(res.clone());
-    if (/think/i.test(detail)) {
-      delete body.generationConfig.thinkingConfig;
-      res = await post(model, key, body);
-    }
-  }
-  if (res.status === 404) { // model retired: pick again next time
-    try { localStorage.removeItem(MODEL_STORAGE); } catch { /* storage blocked */ }
-    throw new AiError('model', await errorDetail(res));
-  }
-  if (res.status === 429) throw new AiError('quota', await errorDetail(res));
-  if (res.status === 400 || res.status === 403) throw new AiError('key', await errorDetail(res));
-  if (!res.ok) throw new AiError('network', await errorDetail(res));
+}
 
-  try {
-    const data = await res.json();
-    const text = data.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? '').join('') ?? '';
-    const r = JSON.parse(text);
-    const n = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
-    return {
-      grams: n(r.grams) || null,
-      kcal: Math.round(n(r.kcal)),
-      protein: Math.round(n(r.protein) * 10) / 10,
-      carbs: Math.round(n(r.carbs) * 10) / 10,
-      fat: Math.round(n(r.fat) * 10) / 10,
-      assumptions: String(r.assumptions ?? '').slice(0, 300),
-      confidence: ['alta', 'media', 'baja'].includes(r.confidence) ? r.confidence : 'baja',
-      model,
-    };
-  } catch {
-    throw new AiError('parse');
+// One model: a retry without the thinking setting if rejected, and one retry if overloaded.
+async function callModel(model, key, description) {
+  const body = requestBody(description, model);
+  let res = await post(model, key, body);
+  if (res.status === 400 && /think/i.test(await errorDetail(res.clone()))) {
+    delete body.generationConfig.thinkingConfig;
+    res = await post(model, key, body);
   }
+  if (res.status === 503 || res.status === 500) {
+    await new Promise((r) => setTimeout(r, 1500));
+    res = await post(model, key, body);
+  }
+  return res;
+}
+
+function parseEstimate(data, model) {
+  const text = data.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? '').join('') ?? '';
+  const r = JSON.parse(text);
+  const n = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
+  return {
+    grams: n(r.grams) || null,
+    kcal: Math.round(n(r.kcal)),
+    protein: Math.round(n(r.protein) * 10) / 10,
+    carbs: Math.round(n(r.carbs) * 10) / 10,
+    fat: Math.round(n(r.fat) * 10) / 10,
+    assumptions: String(r.assumptions ?? '').slice(0, 300),
+    confidence: ['alta', 'media', 'baja'].includes(r.confidence) ? r.confidence : 'baja',
+    model,
+  };
+}
+
+// description: what was eaten, e.g. "1 huevo a la plancha con un poco de oliva".
+// Tries the last model that worked first; if a model is overloaded, slow or retired, moves to the next one.
+export async function estimateNutrition(description) {
+  const key = getKey();
+  if (!key) throw new AiError('nokey');
+  const models = (await candidateModels(key)).slice(0, MAX_MODELS);
+  let lastError = new AiError('model');
+
+  for (const model of models) {
+    let res;
+    try {
+      res = await callModel(model, key, description);
+    } catch (err) {
+      if (err.code === 'timeout') { lastError = err; continue; }
+      throw err;
+    }
+    if (res.ok) {
+      try {
+        const estimate = parseEstimate(await res.json(), model);
+        rememberModel(model);
+        return estimate;
+      } catch {
+        throw new AiError('parse');
+      }
+    }
+    const detail = await errorDetail(res);
+    if ([500, 503, 404].includes(res.status)) {
+      lastError = new AiError(res.status === 404 ? 'model' : 'busy', detail);
+      continue;
+    }
+    if (res.status === 429) throw new AiError('quota', detail);
+    if (res.status === 400 || res.status === 403) throw new AiError('key', detail);
+    throw new AiError('network', detail);
+  }
+  throw lastError;
 }
 
 // Small end-to-end check for the profile screen: how long it takes and what fails.
