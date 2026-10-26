@@ -2,7 +2,7 @@
 import * as db from '../db.js';
 import { state } from '../state.js';
 import { computeTargets } from '../goals.js';
-import { esc, icon, dec, toast, todayKey, shortDate, longDate } from '../util.js';
+import { esc, icon, dec, parseDec, toast, todayKey, shortDate, longDate } from '../util.js';
 
 const main = document.getElementById('main');
 
@@ -24,7 +24,7 @@ export async function renderProgress() {
       </div>
       <form class="weight-form">
         <label class="field"><span>Fecha</span><input name="date" type="date" value="${todayKey()}" max="${todayKey()}" required></label>
-        <label class="field"><span>Peso (kg)</span><input name="kg" type="number" inputmode="decimal" min="30" max="300" step="0.1" required placeholder="${latest ? dec.format(latest.kg) : '68,5'}"></label>
+        <label class="field"><span>Peso (kg)</span><input name="kg" type="text" inputmode="decimal" autocomplete="off" pattern="[0-9]{2,3}([.,][0-9])?" required placeholder="${latest ? dec.format(latest.kg) : '68,5'}"></label>
         <button class="chip strong" type="submit">${icon.plus}<span>Registrar</span></button>
       </form>
       ${weights.length >= 2 ? weightChart(weights) : '<p class="hint">Con dos registros o más vas a ver el gráfico. Pesate siempre en las mismas condiciones, por ejemplo en ayunas.</p>'}
@@ -43,7 +43,7 @@ export async function renderProgress() {
   main.querySelector('.weight-form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const date = ev.target.date.value;
-    const kg = parseFloat(ev.target.kg.value);
+    const kg = parseDec(ev.target.kg.value);
     if (!date || !(kg >= 30 && kg <= 300)) return ev.target.reportValidity();
     await db.put('weights', { id: date, date, kg });
     await maybeUpdateProfileWeight();

@@ -84,6 +84,12 @@ export const timeOf = (ms) => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
+// Decimal numbers typed with comma or dot ("77,4" or "77.4"). Number inputs reject the comma on many phones.
+export function parseDec(value) {
+  const n = parseFloat(String(value ?? '').trim().replace(',', '.'));
+  return Number.isFinite(n) ? n : NaN;
+}
+
 export function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',

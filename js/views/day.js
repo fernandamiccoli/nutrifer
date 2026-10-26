@@ -2,7 +2,7 @@
 import * as db from '../db.js';
 import { state } from '../state.js';
 import {
-  MEALS, mealLabel, momentOf, sortMeds, esc, icon, num, dec, toast, urlFor, releaseUrls, sumMacros,
+  MEALS, mealLabel, momentOf, sortMeds, parseDec, esc, icon, num, dec, toast, urlFor, releaseUrls, sumMacros,
   todayKey, parseKey, shiftKey, shortDate, timeOf,
 } from '../util.js';
 import { findFood, isProduce } from '../catalog.js';
@@ -181,7 +181,7 @@ function weightBlock(weights, date) {
       </header>
       <form class="weight-day">
         <label class="field"><span class="visually-hidden">Peso en kg</span>
-          <input name="kg" type="number" inputmode="decimal" min="30" max="300" step="0.1" value="${today ? today.kg : ''}" placeholder="${dec.format(previous?.kg ?? state.profile.weightKg)}">
+          <input name="kg" type="text" inputmode="decimal" autocomplete="off" pattern="[0-9]{2,3}([.,][0-9])?" value="${today ? dec.format(today.kg) : ''}" placeholder="${dec.format(previous?.kg ?? state.profile.weightKg)}">
         </label>
         <span class="unit">kg</span>
         <button class="chip${today ? '' : ' strong'}" type="submit">${today ? 'Actualizar' : 'Guardar'}</button>
@@ -191,7 +191,7 @@ function weightBlock(weights, date) {
 }
 
 async function saveWeight(kgText) {
-  const kg = parseFloat(String(kgText).replace(',', '.'));
+  const kg = parseDec(kgText);
   if (!(kg >= 30 && kg <= 300)) return toast('Escribí un peso entre 30 y 300 kg.');
   const date = state.currentDate;
   await db.put('weights', { id: date, date, kg });

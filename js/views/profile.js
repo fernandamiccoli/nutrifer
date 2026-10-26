@@ -2,7 +2,7 @@
 import * as db from '../db.js';
 import { state } from '../state.js';
 import { ACTIVITY, GOALS, BOTTLE_ML, computeTargets, normalizeProfile } from '../goals.js';
-import { esc, icon, toast, sortMeds, normalizeMoment, MED_MOMENT_GROUPS } from '../util.js';
+import { esc, icon, dec, parseDec, toast, sortMeds, normalizeMoment, MED_MOMENT_GROUPS } from '../util.js';
 import { getMyFoods } from '../catalog.js';
 import { exportBackup, importBackup } from '../backup.js';
 import { hasKey, saveKey, clearKey, AI_MESSAGES } from '../ai.js';
@@ -45,7 +45,7 @@ export async function renderProfile() {
       <div class="field-grid three">
         <label class="field"><span>Edad</span><input name="age" type="number" inputmode="numeric" min="14" max="100" value="${esc(p.age)}" required></label>
         <label class="field"><span>Altura (cm)</span><input name="heightCm" type="number" inputmode="numeric" min="120" max="230" value="${esc(p.heightCm)}" required></label>
-        <label class="field"><span>Peso (kg)</span><input name="weightKg" type="number" inputmode="decimal" min="30" max="300" step="0.1" value="${esc(p.weightKg)}" required></label>
+        <label class="field"><span>Peso (kg)</span><input name="weightKg" type="text" inputmode="decimal" autocomplete="off" pattern="[0-9]{2,3}([.,][0-9])?" value="${p.weightKg ? esc(dec.format(p.weightKg)) : ''}" required></label>
       </div>
 
       <fieldset class="options">
@@ -163,7 +163,7 @@ function bindProfileForm(p, firstRun) {
     sex: form.sex.value,
     age: parseInt(form.age.value, 10),
     heightCm: parseFloat(form.heightCm.value),
-    weightKg: parseFloat(form.weightKg.value),
+    weightKg: parseDec(form.weightKg.value),
     activity: form.activity.value,
     goals: [...form.querySelectorAll('input[name="goals"]:checked')].map((i) => i.value),
     waterGoalMl: Number(form.water.value) || 2000,
