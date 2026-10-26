@@ -331,7 +331,7 @@ function showAi(prefill = '') {
         <label class="switch"><input type="checkbox" name="save"><span>Guardar en mis alimentos para la próxima</span></label>
         <button class="primary" type="submit">Agregar a ${mealName()}</button>`;
     } catch (err) {
-      out.innerHTML = `<p class="form-error">${esc(AI_MESSAGES[err.code] ?? AI_MESSAGES.network)}</p>`;
+      out.innerHTML = `<p class="form-error">${esc(AI_MESSAGES[err.code] ?? AI_MESSAGES.network)}</p>${err.detail ? `<p class="hint">Detalle de Google: ${esc(err.detail)}</p>` : ''}`;
     } finally {
       btn.disabled = false;
       btn.textContent = 'Calcular de nuevo';

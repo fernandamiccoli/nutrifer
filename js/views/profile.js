@@ -5,7 +5,7 @@ import { ACTIVITY, GOALS, BOTTLE_ML, computeTargets, normalizeProfile } from '..
 import { esc, icon, dec, parseDec, toast, sortMeds, normalizeMoment, MED_MOMENT_GROUPS } from '../util.js';
 import { getMyFoods } from '../catalog.js';
 import { exportBackup, importBackup } from '../backup.js';
-import { hasKey, saveKey, clearKey, AI_MESSAGES } from '../ai.js';
+import { hasKey, saveKey, clearKey, testConnection, AI_MESSAGES } from '../ai.js';
 
 const main = document.getElementById('main');
 const WATER_BOTTLES = [3, 4, 5, 6];
@@ -121,7 +121,11 @@ export async function renderProfile() {
       <p class="hint">Gemini estima calorías, proteínas, carbohidratos y grasas a partir de lo que escribís, por ejemplo "1 huevo a la plancha con un poco de oliva". Solo se envía la descripción del alimento. La clave queda guardada en este dispositivo y no viaja en las copias de seguridad.</p>
       ${aiConnected ? `
         <p class="ai-status"><span class="badge ok">Conectada</span> <span class="muted">modelo ${esc(aiModel)}</span></p>
-        <div class="meal-actions"><button class="chip" data-ai="remove">Quitar la clave de este dispositivo</button></div>` : `
+        <div class="meal-actions">
+          <button class="chip strong" data-ai="test">Probar conexión</button>
+          <button class="chip" data-ai="remove">Quitar la clave de este dispositivo</button>
+        </div>
+        <p class="ai-test hint" aria-live="polite"></p>` : `
         <form class="ai-key">
           <label class="field"><span>Clave de API de Gemini</span><input name="key" type="password" autocomplete="off" spellcheck="false" placeholder="Pegala acá"></label>
           <button class="chip strong" type="submit">Conectar</button>
@@ -277,6 +281,22 @@ function bindSettings() {
       toast(AI_MESSAGES[err.code] ?? AI_MESSAGES.network);
       btn.disabled = false;
       btn.textContent = 'Conectar';
+    }
+  });
+  main.querySelector('[data-ai="test"]')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    const out = main.querySelector('.ai-test');
+    btn.disabled = true;
+    btn.textContent = 'Probando...';
+    out.textContent = 'Le pido a Gemini las calorías de una manzana...';
+    try {
+      const r = await testConnection();
+      out.innerHTML = `<strong>Funciona.</strong> Respondió en ${r.seconds.toLocaleString('es-AR', { maximumFractionDigits: 1 })} s con el modelo ${esc(r.model)} (1 manzana: ${r.kcal} kcal).`;
+    } catch (err) {
+      out.innerHTML = `<strong>No funcionó.</strong> ${esc(AI_MESSAGES[err.code] ?? AI_MESSAGES.network)}${err.detail ? `<br><span class="muted">Detalle de Google: ${esc(err.detail)}</span>` : ''}`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Probar conexión';
     }
   });
   main.querySelector('[data-ai="remove"]')?.addEventListener('click', () => {

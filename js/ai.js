@@ -48,9 +48,10 @@ export async function saveKey(key) {
 }
 
 export class AiError extends Error {
-  constructor(code) {
+  constructor(code, detail = '') {
     super(code);
     this.code = code;
+    this.detail = detail;
   }
 }
 
@@ -62,6 +63,7 @@ export const AI_MESSAGES = {
   model: 'Tu clave no tiene acceso a un modelo de Gemini compatible.',
   parse: 'Gemini respondió algo que no pude leer. Probá de nuevo.',
   storage: 'Este navegador no deja guardar la clave.',
+  timeout: 'Gemini tardó más de 30 segundos. Probá de nuevo; si se repite, usá Probar conexión en el Perfil.',
 };
 
 const SCHEMA = {
@@ -84,6 +86,42 @@ Incluí lo que se agregó al preparar (por ejemplo aceite, manteca, azúcar) si 
 Si la cantidad no está clara, suponé una porción casera típica de Argentina y decilo en "assumptions".
 Si es un producto envasado, usá los valores típicos del producto. No inventes precisión: redondeá kcal a enteros y macros a un decimal.`;
 
+const TIMEOUT_MS = 30000;
+
+// Thinking adds latency and isn't needed for a lookup-style estimate.
+// Gemini 2.x takes thinkingBudget; 3.x and later take thinkingLevel.
+function thinkingConfig(model) {
+  const version = parseFloat(model.match(/gemini-([\d.]+)/)?.[1] ?? '0');
+  return version >= 3 ? { thinkingLevel: 'low' } : { thinkingBudget: 0 };
+}
+
+async function post(model, key, body) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    return await fetch(`${API}/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } catch (err) {
+    throw new AiError(err.name === 'AbortError' ? 'timeout' : 'network');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Google's error text, for the diagnostics shown to the user (never contains the key).
+async function errorDetail(res) {
+  try {
+    const data = await res.json();
+    return `${res.status}: ${data.error?.message ?? ''}`.slice(0, 240);
+  } catch {
+    return String(res.status);
+  }
+}
+
 // description: what was eaten, e.g. "1 huevo a la plancha con un poco de oliva".
 export async function estimateNutrition(description) {
   const key = getKey();
@@ -92,31 +130,36 @@ export async function estimateNutrition(description) {
   try { model = localStorage.getItem(MODEL_STORAGE); } catch { /* storage blocked */ }
   model ||= await pickModel(key);
 
-  let res;
-  try {
-    res = await fetch(`${API}/models/${model}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: INSTRUCTIONS }] },
-        contents: [{ role: 'user', parts: [{ text: description }] }],
-        generationConfig: { temperature: 0.2, responseMimeType: 'application/json', responseSchema: SCHEMA },
-      }),
-    });
-  } catch {
-    throw new AiError('network');
+  const body = {
+    systemInstruction: { parts: [{ text: INSTRUCTIONS }] },
+    contents: [{ role: 'user', parts: [{ text: description }] }],
+    generationConfig: {
+      temperature: 0.2,
+      responseMimeType: 'application/json',
+      responseSchema: SCHEMA,
+      thinkingConfig: thinkingConfig(model),
+    },
+  };
+  let res = await post(model, key, body);
+  if (res.status === 400) {
+    // Some models reject the thinking setting: retry once without it.
+    const detail = await errorDetail(res.clone());
+    if (/think/i.test(detail)) {
+      delete body.generationConfig.thinkingConfig;
+      res = await post(model, key, body);
+    }
   }
   if (res.status === 404) { // model retired: pick again next time
     try { localStorage.removeItem(MODEL_STORAGE); } catch { /* storage blocked */ }
-    throw new AiError('model');
+    throw new AiError('model', await errorDetail(res));
   }
-  if (res.status === 429) throw new AiError('quota');
-  if (res.status === 400 || res.status === 403) throw new AiError('key');
-  if (!res.ok) throw new AiError('network');
+  if (res.status === 429) throw new AiError('quota', await errorDetail(res));
+  if (res.status === 400 || res.status === 403) throw new AiError('key', await errorDetail(res));
+  if (!res.ok) throw new AiError('network', await errorDetail(res));
 
   try {
     const data = await res.json();
-    const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
+    const text = data.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? '').join('') ?? '';
     const r = JSON.parse(text);
     const n = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
     return {
@@ -132,4 +175,11 @@ export async function estimateNutrition(description) {
   } catch {
     throw new AiError('parse');
   }
+}
+
+// Small end-to-end check for the profile screen: how long it takes and what fails.
+export async function testConnection() {
+  const started = performance.now();
+  const r = await estimateNutrition('1 manzana mediana');
+  return { seconds: (performance.now() - started) / 1000, model: r.model, kcal: r.kcal };
 }
