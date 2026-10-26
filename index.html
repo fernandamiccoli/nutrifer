@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#fbf8fa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1f171c" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="Registro personal de comidas, fotos, agua, medicación y actividad.">
+  <meta name="robots" content="noindex, nofollow">
+  <title>NutriFer</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="NutriFer">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,500;7..72,650&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">Ir al contenido</a>
+
+  <nav class="tabs" aria-label="Secciones">
+    <span class="wordmark">NutriFer</span>
+    <a href="#/dia" data-tab="dia">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+      <span>Día</span>
+    </a>
+    <a href="#/progreso" data-tab="progreso">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 19h16"/><path d="m5 15 4-4 3 2 6-6"/></svg>
+      <span>Progreso</span>
+    </a>
+    <a href="#/informe" data-tab="informe">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></svg>
+      <span>Informe</span>
+    </a>
+    <a href="#/perfil" data-tab="perfil">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c1.2-3.6 3.8-5.5 7-5.5s5.8 1.9 7 5.5"/></svg>
+      <span>Perfil</span>
+    </a>
+  </nav>
+
+  <main id="main" tabindex="-1"></main>
+
+  <dialog id="add-dialog" class="sheet" aria-labelledby="add-title"></dialog>
+  <dialog id="photo-dialog" class="viewer" aria-label="Foto del plato"></dialog>
+  <input id="photo-input" type="file" accept="image/*" multiple hidden>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

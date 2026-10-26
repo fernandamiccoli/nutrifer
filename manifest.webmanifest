@@ -1,0 +1,17 @@
+{
+  "name": "NutriFer",
+  "short_name": "NutriFer",
+  "description": "Registro personal de comidas, fotos, agua, medicación y actividad.",
+  "lang": "es-AR",
+  "start_url": "./#/dia",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fbf8fa",
+  "theme_color": "#7a2a5c",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
