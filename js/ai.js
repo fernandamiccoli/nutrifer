@@ -107,17 +107,19 @@ const SCHEMA = {
     protein: { type: 'NUMBER', description: 'gramos' },
     carbs: { type: 'NUMBER', description: 'gramos' },
     fat: { type: 'NUMBER', description: 'gramos' },
+    produceG: { type: 'NUMBER', description: 'Gramos de verduras y frutas que tiene la porción (sin contar papa, batata, mandioca, choclo ni legumbres); 0 si no tiene' },
     assumptions: { type: 'STRING', description: 'Supuestos usados, en una oración breve en español rioplatense' },
     confidence: { type: 'STRING', enum: ['alta', 'media', 'baja'] },
   },
-  required: ['grams', 'kcal', 'protein', 'carbs', 'fat', 'assumptions', 'confidence'],
+  required: ['grams', 'kcal', 'protein', 'carbs', 'fat', 'produceG', 'assumptions', 'confidence'],
 };
 
 const INSTRUCTIONS = `Sos un asistente de nutrición para una persona en Argentina que registra lo que come.
 Estimá energía y macronutrientes de la porción descripta, usando tablas de composición de referencia (ARGENFOODS, USDA).
 Incluí lo que se agregó al preparar (por ejemplo aceite, manteca, azúcar) si se menciona; si dice "un poco de aceite", suponé una cucharadita (5 g).
 Si la cantidad no está clara, suponé una porción casera típica de Argentina y decilo en "assumptions".
-Si es un producto envasado, usá los valores típicos del producto. No inventes precisión: redondeá kcal a enteros y macros a un decimal.`;
+Si es un producto envasado, usá los valores típicos del producto. No inventes precisión: redondeá kcal a enteros y macros a un decimal.
+En "produceG" poné cuántos gramos de verduras y frutas tiene la porción (la referencia de la OMS no cuenta papa, batata, mandioca, choclo ni legumbres).`;
 
 const TOTAL_MS = 30000; // whole calculation, across retries and models
 const ATTEMPT_MS = 15000; // one request, including reading the whole response
@@ -237,6 +239,7 @@ const NUTRITION = {
     protein: Math.round(n(r.protein) * 10) / 10,
     carbs: Math.round(n(r.carbs) * 10) / 10,
     fat: Math.round(n(r.fat) * 10) / 10,
+    produceG: Math.round(n(r.produceG)),
     assumptions: String(r.assumptions ?? '').slice(0, 300),
     confidence: ['alta', 'media', 'baja'].includes(r.confidence) ? r.confidence : 'baja',
   }),

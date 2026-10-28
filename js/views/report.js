@@ -5,7 +5,7 @@ import {
   MEALS, momentLabel, sortMeds, esc, icon, num, dec, sumMacros, todayKey, shiftKey, keysBetween,
   longDate, parseKey, urlFor, releaseUrls, download, toast,
 } from '../util.js';
-import { findFood, isProduce } from '../catalog.js';
+import { findFood, entryProduce } from '../catalog.js';
 import { GOALS, PRODUCE_TARGET_G, targetsForDay } from '../goals.js';
 import { dayActivity, workoutSummary, partLabel } from '../activity.js';
 import { prepSummary } from '../prep.js';
@@ -94,7 +94,7 @@ async function collect(from, to) {
       date,
       entries: dayEntries,
       totals: sumMacros(dayEntries),
-      produceG: dayEntries.reduce((s, e) => s + (isProduce(findFood(e.foodId)) ? e.grams ?? 0 : 0), 0),
+      produceG: dayEntries.reduce((s, e) => s + entryProduce(e), 0),
       photos: photos.filter((p) => p.date === date),
       notes: notes.filter((n) => n.date === date),
       waterMl: water.find((w) => w.date === date)?.ml ?? 0,
@@ -298,12 +298,15 @@ function activityChartsHtml(days) {
 
 let fillRunning = false;
 
+// Entries the AI can complete: no calories yet, or an AI dish without its fruit/vegetable grams.
+const needsAi = (e) => e.macrosMissing || (e.aiEstimated && e.produceG == null && !findFood(e.foodId)?.tags?.length);
+
 function paintAiFill(days) {
   const box = main.querySelector('.ai-fill');
   if (!box || fillRunning) return;
-  const missing = days.flatMap((d) => d.entries).filter((e) => e.macrosMissing).length;
+  const missing = days.flatMap((d) => d.entries).filter(needsAi).length;
   box.innerHTML = missing
-    ? `<p class="notice">${missing} ${missing === 1 ? 'alimento no tiene' : 'alimentos no tienen'} calorías ni macros en este período.
+    ? `<p class="notice">${missing} ${missing === 1 ? 'alimento necesita' : 'alimentos necesitan'} datos de la IA en este período (calorías y macros, o gramos de frutas y verduras).
         ${hasKey() ? '<button type="button" class="chip strong" data-r="ai-fill">Completar con IA</button>' : '<a href="#/perfil#ai">Conectá Gemini en el Perfil</a> para completarlos.'}</p>`
     : '';
 }
@@ -313,7 +316,8 @@ async function fillMissingWithAi() {
   fillRunning = true;
   const box = main.querySelector('.ai-fill');
   const { days } = await collect(range.from, range.to);
-  const todo = days.flatMap((d) => d.entries).filter((e) => e.macrosMissing);
+  // Foods without calories, and dishes estimated by AI before it also measured fruit and vegetables.
+  const todo = days.flatMap((d) => d.entries).filter(needsAi);
   let done = 0;
   let failed = 0;
   let lastError = '';
@@ -322,14 +326,15 @@ async function fillMissingWithAi() {
     try {
       const desc = [`${e.qtyLabel} de ${e.name}`, e.prep?.toLowerCase(), e.itemNote].filter(Boolean).join(', ');
       const r = await estimateNutrition(desc);
-      await db.put('entries', {
+      await db.put('entries', e.macrosMissing ? {
         ...e,
         kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat,
         grams: e.grams ?? r.grams,
+        produceG: r.produceG,
         macrosMissing: false,
         aiEstimated: true,
         aiNote: `${r.assumptions} (confianza ${r.confidence})`,
-      });
+      } : { ...e, produceG: r.produceG }); // keep its calories, only add the fruit/vegetable grams
       done += 1;
     } catch (err) {
       failed += 1;

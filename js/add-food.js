@@ -188,6 +188,7 @@ function showPortion(food) {
         const updated = await saveMyFood({
           ...food,
           kcal: r.kcal, p: r.protein, c: r.carbs, f: r.fat,
+          produceG: r.produceG,
           perUnit: true,
           unit: { label: food.unit.label, g: 100 },
           missing: false,
@@ -210,7 +211,12 @@ function showPortion(food) {
       return form.amount.focus();
     }
     const { oilG, ...prep } = readPrep(form);
-    await saveEntries([{ foodId: food.id, name: food.name, ...v, ...prep, ...(food.aiEstimated ? { aiEstimated: true, aiNote: food.aiNote } : {}) }], null, oilG);
+    const amount = parseFloat(form.amount.value);
+    // Foods that know their fruit/vegetable grams per portion (measured by the AI) scale with the amount.
+    const produce = food.produceG != null
+      ? { produceG: Math.round(form.unit.value === 'g' ? (food.produceG * amount) / food.unit.g : food.produceG * amount) }
+      : {};
+    await saveEntries([{ foodId: food.id, name: food.name, ...v, ...prep, ...produce, ...(food.aiEstimated ? { aiEstimated: true, aiNote: food.aiNote } : {}) }], null, oilG);
   });
   paint();
   if (matchMedia('(pointer: fine)').matches) form.amount.select();
@@ -360,6 +366,7 @@ function showAi(prefill = '') {
           <div><dt>Proteínas</dt><dd>${dec.format(estimate.protein)} g</dd></div>
           <div><dt>Carbohidratos</dt><dd>${dec.format(estimate.carbs)} g</dd></div>
           <div><dt>Grasas</dt><dd>${dec.format(estimate.fat)} g</dd></div>
+          <div><dt>Frutas y verduras</dt><dd>${num.format(estimate.produceG)} g</dd></div>
         </dl>
         <p class="hint"><strong>Estimación de IA, confianza ${esc(estimate.confidence)}.</strong> ${esc(estimate.assumptions)}${estimate.grams ? ` Peso estimado: ${num.format(estimate.grams)} g.` : ''}</p>
         <label class="switch"><input type="checkbox" name="save"><span>Guardar en mis alimentos para la próxima</span></label>
@@ -385,6 +392,7 @@ function showAi(prefill = '') {
       const food = await saveMyFood({
         name,
         kcal: estimate.kcal, p: estimate.protein, c: estimate.carbs, f: estimate.fat,
+        produceG: estimate.produceG,
         unit: { label: 'porción', g: 100 },
         perUnit: true,
         tags: [],
@@ -402,6 +410,7 @@ function showAi(prefill = '') {
       protein: estimate.protein,
       carbs: estimate.carbs,
       fat: estimate.fat,
+      produceG: estimate.produceG,
       aiEstimated: true,
       aiNote: `${estimate.assumptions} (confianza ${estimate.confidence})`,
     }]);

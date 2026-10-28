@@ -5,13 +5,13 @@ import {
   MEALS, mealLabel, momentOf, sortMeds, parseDec, esc, icon, num, dec, toast, urlFor, releaseUrls, sumMacros,
   todayKey, parseKey, shiftKey, shortDate, timeOf,
 } from '../util.js';
-import { findFood, isProduce } from '../catalog.js';
+import { findFood, entryProduce } from '../catalog.js';
 import { PRODUCE_TARGET_G, BOTTLE_ML, targetsForDay } from '../goals.js';
 import { WORKOUT_TYPES, MUSCLES, ratesFor, kcalFromRate, workoutSummary, dayActivity, partLabel } from '../activity.js';
 import { openAddFood } from '../add-food.js';
 import { compressPhoto } from '../photos.js';
 import { prepFieldsHtml, readPrep, prepSummary, syncOilEntry } from '../prep.js';
-import { estimateNutrition, parseWorkout, aiProgress, aiErrorHtml } from '../ai.js';
+import { estimateNutrition, parseWorkout, aiProgress, aiErrorHtml, hasKey } from '../ai.js';
 import { maybeUpdateProfileWeight } from './progress.js';
 
 const main = document.getElementById('main');
@@ -51,7 +51,7 @@ export async function renderDay() {
   const t = targetsForDay(p, activity.totalKcal);
   const totals = sumMacros(entries);
   const left = t.kcal - totals.kcal;
-  const produceG = entries.reduce((s, e) => s + (isProduce(findFood(e.foodId)) ? e.grams ?? 0 : 0), 0);
+  const produceG = entries.reduce((s, e) => s + entryProduce(e), 0);
 
   main.classList.toggle('animate', animate);
   main.innerHTML = `
@@ -86,6 +86,12 @@ export async function renderDay() {
         ${macroRow('Grasas', totals.fat, t.fat, 'g', 'fat')}
         ${macroRow('Frutas y verduras', produceG, PRODUCE_TARGET_G, 'g', 'produce')}
       </dl>
+      ${(() => {
+        const pending = entries.filter(missingProduce).length;
+        return pending && hasKey()
+          ? `<p class="budget-activity"><button class="link" data-action="ai-produce">Calcular frutas y verduras con IA (${pending} ${pending === 1 ? 'plato' : 'platos'})</button></p>`
+          : '';
+      })()}
     </section>
 
     <div class="trackers">
@@ -133,6 +139,29 @@ function macroRow(label, value, target, unit, kind) {
       <dd><span class="num">${num.format(value)}</span> / ${num.format(target)} ${unit}</dd>
       ${meter(value, target, kind)}
     </div>`;
+}
+
+// Dishes estimated by AI before it also measured fruit and vegetables.
+const missingProduce = (e) => e.aiEstimated && e.produceG == null && !findFood(e.foodId)?.tags?.length;
+
+async function fillProduce(btn) {
+  const todo = (await db.byDate('entries', state.currentDate)).filter(missingProduce);
+  btn.disabled = true;
+  let done = 0;
+  for (const e of todo) {
+    btn.textContent = `Calculando ${done + 1} de ${todo.length}...`;
+    try {
+      const desc = [`${e.qtyLabel} de ${e.name}`, e.prep?.toLowerCase(), e.itemNote].filter(Boolean).join(', ');
+      const r = await estimateNutrition(desc);
+      await db.put('entries', { ...e, produceG: r.produceG });
+      done += 1;
+    } catch (err) {
+      toast(`No pude completar ${e.name}: ${err.detail || err.code}`);
+      break;
+    }
+  }
+  await renderDay();
+  if (done) toast(`Frutas y verduras calculadas en ${done} ${done === 1 ? 'plato' : 'platos'}`);
 }
 
 // ---------- water ----------
@@ -402,7 +431,7 @@ async function editEntry(id) {
       try {
         const r = await estimateNutrition(desc, progress.options);
         aiResult = r;
-        progress.done(`<strong>${num.format(r.kcal)} kcal · P ${dec.format(r.protein)} · C ${dec.format(r.carbs)} · G ${dec.format(r.fat)} g</strong> (confianza ${esc(r.confidence)}). ${esc(r.assumptions)} Tocá Guardar para usar estos valores.`);
+        progress.done(`<strong>${num.format(r.kcal)} kcal · P ${dec.format(r.protein)} · C ${dec.format(r.carbs)} · G ${dec.format(r.fat)} g · frutas y verduras ${num.format(r.produceG)} g</strong> (confianza ${esc(r.confidence)}). ${esc(r.assumptions)} Tocá Guardar para usar estos valores.`);
       } catch (err) {
         progress.done(aiErrorHtml(err));
       }
@@ -415,7 +444,7 @@ async function editEntry(id) {
     const { oilG, ...prep } = readPrep(form);
     const values = aiResult ? {
       kcal: aiResult.kcal, protein: aiResult.protein, carbs: aiResult.carbs, fat: aiResult.fat,
-      grams: e.grams ?? aiResult.grams, macrosMissing: false, aiEstimated: true,
+      grams: e.grams ?? aiResult.grams, produceG: aiResult.produceG, macrosMissing: false, aiEstimated: true,
       aiNote: `${aiResult.assumptions} (confianza ${aiResult.confidence})`,
     } : {};
     const saved = await db.put('entries', { ...e, ...prep, ...values });
@@ -709,6 +738,7 @@ main.addEventListener('click', async (ev) => {
   if (action === 'delete-entry') deleteEntry(id);
   if (action === 'edit-entry') editEntry(id);
   if (action === 'water') addWater(Number(btn.dataset.ml));
+  if (action === 'ai-produce') fillProduce(btn);
   if (action === 'edit-workout') editWorkout(id);
 });
 

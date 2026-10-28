@@ -66,6 +66,7 @@ export function renderFoodEditor(container, { food, draft, missing = [], title, 
   const form = container.querySelector('form');
   let aiNote = src.aiNote ?? '';
   let aiEstimated = !!src.aiEstimated;
+  let aiProduce = src.produceG ?? null; // fruit/vegetable grams per portion, measured by the AI
   form.addEventListener('click', async (ev) => {
     const b = ev.target.closest('[data-ed]');
     if (b?.dataset.ed === 'back') onBack?.();
@@ -89,6 +90,7 @@ export function renderFoodEditor(container, { food, draft, missing = [], title, 
         form.c.value = r.carbs;
         form.f.value = r.fat;
         aiEstimated = true;
+        aiProduce = r.produceG;
         aiNote = `${r.assumptions} (confianza ${r.confidence})`;
         progress.done(`<strong>Estimación de IA, confianza ${esc(r.confidence)}.</strong> ${esc(r.assumptions)} Revisá los valores y guardá.`);
       } catch (err) {
@@ -140,6 +142,7 @@ export function renderFoodEditor(container, { food, draft, missing = [], title, 
       missing: kcal === null,
       aiEstimated,
       aiNote,
+      ...(aiProduce != null ? { produceG: aiProduce } : {}),
       tags,
     });
     onSaved(saved);

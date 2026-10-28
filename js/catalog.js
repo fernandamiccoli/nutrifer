@@ -51,3 +51,10 @@ export function search(query, filter = 'all') {
 export function isProduce(food) {
   return !!food && (food.tags?.includes('veg') || food.tags?.includes('fruit'));
 }
+
+// Grams of fruit and vegetables in one logged entry:
+// what the AI measured for that dish, or the grams of a food tagged as fruit/vegetable.
+export function entryProduce(e) {
+  if (e.produceG != null) return e.produceG;
+  return isProduce(findFood(e.foodId)) ? e.grams ?? 0 : 0;
+}
